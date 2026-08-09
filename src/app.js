@@ -23,5 +23,6 @@ app.use("/api/wishlist", wishlistRoutes);
 app.use("/api/orders", require("./../routes/order.routes"));
 app.use("/api/auth", require("./../routes/auth.routes"));
 app.use("/api/addresses", require("./../routes/address.routes"));
+app.use("/api/payments", require("./../routes/payment.routes"));
 
 module.exports = app;

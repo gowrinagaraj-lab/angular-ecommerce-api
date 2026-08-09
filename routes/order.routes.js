@@ -5,7 +5,9 @@ const router = express.Router();
 
 const protect = require("../src/middleware/auth.middleware");
 
-const { checkout } = require("../controllers/order.controller");
+const { checkout, getOrders } = require("../controllers/order.controller");
+
+router.get("/", protect, getOrders);
 
 router.post(
     "/checkout",

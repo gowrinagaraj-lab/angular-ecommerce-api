@@ -46,10 +46,12 @@ exports.addAddress = async (req, res) => {
         const { fullName, phone, address, city, state, country, pincode, location, isDefault } = req.body;
 
         const existingCount = await Address.countDocuments({ user: userId });
-
+console.log("Existing address count:", existingCount);
+// return  false
         const shouldBeDefault = isDefault === true || existingCount === 0;
-
+console.log("Should be default:", shouldBeDefault);
         if (shouldBeDefault) {
+             
             await Address.updateMany({ user: userId }, { isDefault: false });
         }
 

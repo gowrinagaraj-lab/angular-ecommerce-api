@@ -25,7 +25,7 @@ exports.addToCart = async (req, res) => {
         }
 
         const userId = req.user.id;
-
+console.log(req.user, ' userId')
         const { productId, quantity } = req.body;
 
         const product = await Product.findById(productId);
