@@ -4,10 +4,67 @@ const { body } = require("express-validator");
 const router = express.Router();
 
 const protect = require("../src/middleware/auth.middleware");
+const authorize = require("../src/middleware/authorize.middleware");
 
-const { checkout, getOrders } = require("../controllers/order.controller");
+const {
+    checkout,
+    getOrders,
+    getAllOrders,
+    getOrderById,
+    updateOrderStatus,
+    cancelOrder,
+    generateDeliveryOtp,
+    verifyDeliveryOtp
+} = require("../controllers/order.controller");
 
 router.get("/", protect, getOrders);
+
+router.get("/admin/all", protect, authorize("admin"), getAllOrders);
+
+router.get("/:id", protect, getOrderById);
+
+router.patch(
+    "/:id/status",
+    protect,
+    authorize("admin"),
+    [
+        body("orderStatus")
+            .trim()
+            .notEmpty()
+            .withMessage("orderStatus is required")
+            .isIn(["Pending", "Processing", "Shipped"])
+            .withMessage("orderStatus must be one of Pending, Processing, Shipped")
+    ],
+    updateOrderStatus
+);
+
+router.patch(
+    "/:id/cancel",
+    protect,
+    cancelOrder
+);
+
+router.post(
+    "/:id/generate-delivery-otp",
+    protect,
+    authorize("admin"),
+    generateDeliveryOtp
+);
+
+router.post(
+    "/:id/verify-delivery-otp",
+    protect,
+    authorize("admin"),
+    [
+        body("otp")
+            .trim()
+            .notEmpty()
+            .withMessage("otp is required")
+            .isLength({ min: 6, max: 6 })
+            .withMessage("otp must be 6 digits")
+    ],
+    verifyDeliveryOtp
+);
 
 router.post(
     "/checkout",

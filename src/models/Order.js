@@ -87,6 +87,16 @@ const orderSchema = new mongoose.Schema(
         totalAmount: {
             type: Number,
             required: true
+        },
+
+        deliveryOtp: {
+            type: String,
+            select: false
+        },
+
+        deliveryOtpExpire: {
+            type: Date,
+            select: false
         }
     },
     {

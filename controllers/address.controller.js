@@ -97,7 +97,7 @@ exports.updateAddress = async (req, res) => {
                 message: errors.array()[0].msg
             });
         }
-
+console.log("Request body:", req.user.id);
         const userId = req.user.id;
 
         const existingAddress = await Address.findOne({ _id: req.params.addressId, user: userId });
