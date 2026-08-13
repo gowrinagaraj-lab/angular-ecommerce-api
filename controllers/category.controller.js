@@ -167,6 +167,59 @@ exports.updateCategory = async (req, res) => {
 
 
 /*
+Toggle Category Active Status
+PATCH /api/categories/:id/status
+*/
+exports.toggleCategoryStatus = async (req, res) => {
+  try {
+    const { isActive } = req.body;
+
+    if (typeof isActive !== "boolean") {
+      return res.status(400).json({
+        success: false,
+        message: "isActive must be a boolean value (true or false)"
+      });
+    }
+
+    const category = await Category.findByIdAndUpdate(
+      req.params.id,
+      { isActive },
+      {
+        new: true,
+        runValidators: true
+      }
+    );
+
+    if (!category) {
+      return res.status(404).json({
+        success: false,
+        message: "Category not found"
+      });
+    }
+
+    res.json({
+      success: true,
+      message: `Category ${isActive ? "activated" : "deactivated"} successfully`,
+      data: category
+    });
+
+  } catch (error) {
+    if (error.kind === "ObjectId") {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid category ID format"
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+
+/*
 Delete Category
 DELETE /api/categories/:id
 */

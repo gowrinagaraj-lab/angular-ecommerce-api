@@ -21,9 +21,9 @@ const {
 
 
 
-router.post("/", protect, authorize("admin"), createProduct);
+router.post("/", protect, authorize('admin'), createProduct);
 
-router.get("/", getProducts);
+router.get("/", protect, getProducts);
 
 router.get("/:id", getProductById);
 
