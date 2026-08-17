@@ -3,7 +3,17 @@ const { body } = require("express-validator");
 
 const router = express.Router();
 
-const { register, login, forgotPassword, resetPassword } = require("../controllers/auth.controller");
+const protect = require("../src/middleware/auth.middleware");
+const authorize = require("../src/middleware/authorize.middleware");
+
+const {
+    register,
+    login,
+    forgotPassword,
+    resetPassword,
+    getMySignInActivity,
+    getAllSignInActivity
+} = require("../controllers/auth.controller");
 
 router.post(
     "/register",
@@ -60,5 +70,9 @@ router.post(
     ],
     resetPassword
 );
+
+router.get("/sign-in-activity", protect, getMySignInActivity);
+
+router.get("/admin/sign-in-activity", protect, authorize("admin"), getAllSignInActivity);
 
 module.exports = router;

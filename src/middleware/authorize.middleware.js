@@ -1,5 +1,5 @@
 const authorize = (...allowedRoles) => {
-    console.log(allowedRoles, 'asdsd')
+ 
     return (req, res, next) => {
         console.log(req.user, ' userId', allowedRoles, ' allowedRoles')
         if (!req.user || !allowedRoles.includes(req.user.role)) {

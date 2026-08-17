@@ -3,8 +3,24 @@ const crypto = require("crypto");
 const { validationResult } = require("express-validator");
 
 const User = require("../src/models/User");
+const SignInActivity = require("../src/models/SignInActivity");
 const generateToken = require("../utils/generateToken");
 const sendEmail = require("../utils/sendEmail");
+
+const logSignInActivity = ({ email, user, req, status, failureReason }) => {
+
+    SignInActivity.create({
+        email: email.toLowerCase(),
+        user: user || undefined,
+        ipAddress: req.ip,
+        userAgent: req.headers["user-agent"],
+        status,
+        failureReason
+    }).catch((error) => {
+        console.error("Failed to log sign-in activity:", error.message);
+    });
+
+};
 
 /*
 Register User
@@ -110,6 +126,13 @@ exports.login = async (req, res) => {
 // console.log(user, ' user')
         if (!user) {
 
+            logSignInActivity({
+                email,
+                req,
+                status: "Failed",
+                failureReason: "No account found with this email"
+            });
+
             return res.status(401).json({
                 success: false,
                 message: "Invalid email or password"
@@ -121,6 +144,14 @@ exports.login = async (req, res) => {
 // console.log(password, user.password,"sdfsdfs")
         if (!isMatch) {
 
+            logSignInActivity({
+                email,
+                user: user._id,
+                req,
+                status: "Failed",
+                failureReason: "Incorrect password"
+            });
+
             return res.status(401).json({
                 success: false,
                 message: "Invalid email or password"
@@ -129,7 +160,14 @@ exports.login = async (req, res) => {
         }
 
         const token = generateToken(user._id, user.role);
-console.log(token, 'token')
+
+        logSignInActivity({
+            email,
+            user: user._id,
+            req,
+            status: "Success"
+        });
+
         res.status(200).json({
             success: true,
             message: "Login successful",
@@ -285,6 +323,109 @@ exports.resetPassword = async (req, res) => {
             success: true,
             message: "Password reset successful",
             data: { token }
+        });
+
+    } catch (error) {
+
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+
+    }
+
+};
+
+
+/*
+Get My Sign-In Activity
+
+GET /api/auth/sign-in-activity
+*/
+
+exports.getMySignInActivity = async (req, res) => {
+
+    try {
+
+        const page = Math.max(1, Number(req.query.page) || 1);
+
+        const limit = Math.max(1, Number(req.query.limit) || 10);
+
+        const skip = (page - 1) * limit;
+
+        const filter = { user: req.user.id };
+
+        const total = await SignInActivity.countDocuments(filter);
+
+        const activity = await SignInActivity.find(filter)
+            .sort("-createdAt")
+            .skip(skip)
+            .limit(limit);
+
+        res.status(200).json({
+            success: true,
+            total,
+            page,
+            totalPages: Math.ceil(total / limit),
+            data: activity
+        });
+
+    } catch (error) {
+
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+
+    }
+
+};
+
+
+/*
+Get All Sign-In Activity (Admin)
+
+GET /api/auth/admin/sign-in-activity
+*/
+
+exports.getAllSignInActivity = async (req, res) => {
+
+    try {
+
+        const page = Math.max(1, Number(req.query.page) || 1);
+
+        const limit = Math.max(1, Number(req.query.limit) || 10);
+
+        const skip = (page - 1) * limit;
+
+        const filter = {};
+
+        if (req.query.email) {
+
+            filter.email = req.query.email.toLowerCase();
+
+        }
+
+        if (req.query.status) {
+
+            filter.status = req.query.status;
+
+        }
+
+        const total = await SignInActivity.countDocuments(filter);
+
+        const activity = await SignInActivity.find(filter)
+            .populate("user", "name email")
+            .sort("-createdAt")
+            .skip(skip)
+            .limit(limit);
+
+        res.status(200).json({
+            success: true,
+            total,
+            page,
+            totalPages: Math.ceil(total / limit),
+            data: activity
         });
 
     } catch (error) {
