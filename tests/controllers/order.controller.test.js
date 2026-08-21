@@ -3,6 +3,9 @@ jest.mock("../../src/models/Order");
 jest.mock("../../src/models/Product");
 jest.mock("../../src/models/Address");
 jest.mock("../../utils/sendEmail");
+jest.mock("../../utils/notification", () => ({
+    createUserNotification: jest.fn().mockResolvedValue(null)
+}));
 jest.mock("../../src/config/razorpay", () => ({
     orders: { create: jest.fn() }
 }));
@@ -29,6 +32,7 @@ const invalidRequest = (msg) => ({ isEmpty: () => false, array: () => [{ msg }] 
 describe("order.controller", () => {
 
     beforeEach(() => {
+        jest.clearAllMocks();
         validationResult.mockReturnValue(validRequest());
     });
 
@@ -124,6 +128,9 @@ describe("order.controller", () => {
             Cart.findOne.mockReturnValue({ populate: jest.fn().mockResolvedValue(cart) });
             const order = { _id: "order-1", save: jest.fn().mockResolvedValue(true) };
             Order.create.mockResolvedValue(order);
+            Order.findById.mockReturnValue({
+                populate: jest.fn().mockResolvedValue({ user: { name: "Jane", email: "jane@example.com", role: "customer" } })
+            });
 
             const req = { user: { id: "user-1" }, body: { addressId: "addr-1", paymentMethod: "COD" } };
             const res = mockResponse();
@@ -135,6 +142,35 @@ describe("order.controller", () => {
             expect(cart.items).toHaveLength(0);
             expect(cart.save).toHaveBeenCalled();
             expect(razorpay.orders.create).not.toHaveBeenCalled();
+            expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({
+                to: "jane@example.com",
+                subject: expect.stringContaining("Order Confirmation")
+            }));
+            expect(res.status).toHaveBeenCalledWith(201);
+            expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ message: "Order placed successfully" }));
+
+        });
+
+        it("still places the order when the confirmation email fails to send", async () => {
+
+            Address.findOne.mockResolvedValue(address);
+            const cart = {
+                items: [{ product: { _id: "p1", name: "Widget", price: 10, stock: 5 }, quantity: 2 }],
+                save: jest.fn().mockResolvedValue(true)
+            };
+            Cart.findOne.mockReturnValue({ populate: jest.fn().mockResolvedValue(cart) });
+            const order = { _id: "order-1", save: jest.fn().mockResolvedValue(true) };
+            Order.create.mockResolvedValue(order);
+            Order.findById.mockReturnValue({
+                populate: jest.fn().mockResolvedValue({ user: { name: "Jane", email: "jane@example.com", role: "customer" } })
+            });
+            sendEmail.mockRejectedValueOnce(new Error("SMTP down"));
+
+            const req = { user: { id: "user-1" }, body: { addressId: "addr-1", paymentMethod: "COD" } };
+            const res = mockResponse();
+
+            await orderController.checkout(req, res);
+
             expect(res.status).toHaveBeenCalledWith(201);
             expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ message: "Order placed successfully" }));
 
@@ -170,6 +206,9 @@ describe("order.controller", () => {
             Cart.findOne.mockReturnValue({ populate: jest.fn().mockResolvedValue(cart) });
             const order = { _id: "order-1", save: jest.fn().mockResolvedValue(true) };
             Order.create.mockResolvedValue(order);
+            Order.findById.mockReturnValue({
+                populate: jest.fn().mockResolvedValue({ user: { name: "Jane", email: "jane@example.com", role: "customer" } })
+            });
             razorpay.orders.create.mockResolvedValue({ id: "rzp_order_1", amount: 1000, currency: "INR" });
 
             const req = { user: { id: "user-1" }, body: { addressId: "addr-1", paymentMethod: "CARD" } };
@@ -182,6 +221,7 @@ describe("order.controller", () => {
             expect(order.save).toHaveBeenCalled();
             expect(Product.findByIdAndUpdate).not.toHaveBeenCalled();
             expect(cart.save).not.toHaveBeenCalled();
+            expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({ to: "jane@example.com" }));
             expect(res.status).toHaveBeenCalledWith(201);
             expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
                 message: "Order created, awaiting payment",
@@ -376,16 +416,19 @@ describe("order.controller", () => {
 
         });
 
-        it("marks a COD order Delivered and Paid on a correct OTP", async () => {
+        it("marks a COD order Delivered and Paid on a correct OTP, and sends a delivery confirmation email", async () => {
 
             const order = {
+                _id: "order-1",
                 orderStatus: "Processing",
                 paymentMethod: "COD",
                 deliveryOtp: hashOtp("123456"),
                 deliveryOtpExpire: Date.now() + 60000,
                 save: jest.fn().mockResolvedValue(true)
             };
-            Order.findById.mockReturnValue({ select: jest.fn().mockResolvedValue(order) });
+            Order.findById
+                .mockReturnValueOnce({ select: jest.fn().mockResolvedValue(order) })
+                .mockReturnValueOnce({ populate: jest.fn().mockResolvedValue({ user: { name: "Jane", email: "jane@example.com", role: "customer" } }) });
 
             const req = { params: { id: "order-1" }, body: { otp: "123456" } };
             const res = mockResponse();
@@ -395,6 +438,35 @@ describe("order.controller", () => {
             expect(order.orderStatus).toBe("Delivered");
             expect(order.paymentStatus).toBe("Paid");
             expect(order.deliveryOtp).toBeUndefined();
+            expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({
+                to: "jane@example.com",
+                subject: expect.stringContaining("Delivered")
+            }));
+            expect(res.status).toHaveBeenCalledWith(200);
+
+        });
+
+        it("does not send a delivery confirmation email when the order owner is an admin", async () => {
+
+            const order = {
+                _id: "order-1",
+                orderStatus: "Processing",
+                paymentMethod: "COD",
+                deliveryOtp: hashOtp("123456"),
+                deliveryOtpExpire: Date.now() + 60000,
+                save: jest.fn().mockResolvedValue(true)
+            };
+            Order.findById
+                .mockReturnValueOnce({ select: jest.fn().mockResolvedValue(order) })
+                .mockReturnValueOnce({ populate: jest.fn().mockResolvedValue({ user: { name: "Admin", email: "admin@example.com", role: "admin" } }) });
+
+            const req = { params: { id: "order-1" }, body: { otp: "123456" } };
+            const res = mockResponse();
+
+            await orderController.verifyDeliveryOtp(req, res);
+
+            expect(order.orderStatus).toBe("Delivered");
+            expect(sendEmail).not.toHaveBeenCalled();
             expect(res.status).toHaveBeenCalledWith(200);
 
         });
@@ -455,6 +527,63 @@ describe("order.controller", () => {
             const res = mockResponse();
 
             await orderController.getAllOrders(req, res);
+
+            expect(res.status).toHaveBeenCalledWith(500);
+
+        });
+
+    });
+
+    describe("getOrderStats", () => {
+
+        it("returns delivered/cancelled counts and the total amount sum", async () => {
+
+            Order.aggregate.mockResolvedValue([{
+                delivered: [{ count: 4 }],
+                cancelled: [{ count: 2 }],
+                totalAmount: [{ sum: 1500 }]
+            }]);
+
+            const req = {};
+            const res = mockResponse();
+
+            await orderController.getOrderStats(req, res);
+
+            expect(res.status).toHaveBeenCalledWith(200);
+            expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+                success: true,
+                data: expect.objectContaining({ totalDelivered: 4, totalCancelled: 2, totalAmount: 1500 })
+            }));
+
+        });
+
+        it("defaults counts and sum to 0 when there are no matching orders", async () => {
+
+            Order.aggregate.mockResolvedValue([{
+                delivered: [],
+                cancelled: [],
+                totalAmount: []
+            }]);
+
+            const req = {};
+            const res = mockResponse();
+
+            await orderController.getOrderStats(req, res);
+
+            expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+                data: expect.objectContaining({ totalDelivered: 0, totalCancelled: 0, totalAmount: 0 })
+            }));
+
+        });
+
+        it("returns 500 on unexpected errors", async () => {
+
+            Order.aggregate.mockRejectedValue(new Error("DB down"));
+
+            const req = {};
+            const res = mockResponse();
+
+            await orderController.getOrderStats(req, res);
 
             expect(res.status).toHaveBeenCalledWith(500);
 
@@ -634,9 +763,10 @@ describe("order.controller", () => {
 
         });
 
-        it("restocks items when cancelling a paid order and marks it Cancelled", async () => {
+        it("restocks items when cancelling a paid order, marks it Cancelled, and sends a cancellation email", async () => {
 
             const order = {
+                _id: "order-1",
                 user: { toString: () => "user-1" },
                 orderStatus: "Processing",
                 paymentMethod: "CARD",
@@ -644,7 +774,9 @@ describe("order.controller", () => {
                 items: [{ product: "p1", quantity: 3 }],
                 save: jest.fn().mockResolvedValue(true)
             };
-            Order.findById.mockResolvedValue(order);
+            Order.findById
+                .mockResolvedValueOnce(order)
+                .mockReturnValueOnce({ populate: jest.fn().mockResolvedValue({ user: { name: "Jane", email: "jane@example.com", role: "customer" } }) });
 
             const req = { params: { id: "order-1" }, user: { id: "user-1", role: "customer" } };
             const res = mockResponse();
@@ -653,6 +785,10 @@ describe("order.controller", () => {
 
             expect(Product.findByIdAndUpdate).toHaveBeenCalledWith("p1", { $inc: { stock: 3 } });
             expect(order.orderStatus).toBe("Cancelled");
+            expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({
+                to: "jane@example.com",
+                subject: expect.stringContaining("Cancelled")
+            }));
             expect(res.status).toHaveBeenCalledWith(200);
 
         });

@@ -23,60 +23,7 @@ router.get("/", getAddresses);
 
 router.post(
     "/",
-    [
-        body("fullName")
-            .trim()
-            .notEmpty()
-            .withMessage("fullName is required"),
 
-        body("phone")
-            .trim()
-            .notEmpty()
-            .withMessage("phone is required"),
-
-        body("address")
-            .trim()
-            .notEmpty()
-            .withMessage("address is required"),
-
-        body("city")
-            .trim()
-            .notEmpty()
-            .withMessage("city is required"),
-
-        body("state")
-            .trim()
-            .notEmpty()
-            .withMessage("state is required")
-            .bail()
-            .isIn(INDIAN_STATES)
-            .withMessage("state must be a valid Indian state or union territory"),
-
-        body("country")
-            .trim()
-            .notEmpty()
-            .withMessage("country is required"),
-
-        body("pincode")
-            .trim()
-            .notEmpty()
-            .withMessage("pincode is required"),
-
-        body("location.lat")
-            .optional()
-            .isFloat({ min: -90, max: 90 })
-            .withMessage("location.lat must be between -90 and 90"),
-
-        body("location.lng")
-            .optional()
-            .isFloat({ min: -180, max: 180 })
-            .withMessage("location.lng must be between -180 and 180"),
-
-        body("isDefault")
-            .optional()
-            .isBoolean()
-            .withMessage("isDefault must be a boolean")
-    ],
     addAddress
 );
 

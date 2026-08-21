@@ -106,6 +106,7 @@ describe("product.controller", () => {
     describe("getProducts", () => {
 
         const chainable = (result) => ({
+            select: jest.fn().mockReturnThis(),
             populate: jest.fn().mockReturnThis(),
             sort: jest.fn().mockReturnThis(),
             skip: jest.fn().mockReturnThis(),
@@ -125,6 +126,23 @@ describe("product.controller", () => {
 
             expect(Product.find).toHaveBeenCalledWith({});
             expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ success: true, total: 1, page: 1, data: products }));
+
+        });
+
+        it("applies the shared product projection to list queries", async () => {
+
+            const query = chainable([]);
+            Product.countDocuments.mockResolvedValue(0);
+            Product.find.mockReturnValue(query);
+
+            const req = { query: {} };
+            const res = mockResponse();
+
+            await productController.getProducts(req, res);
+
+            expect(query.select).toHaveBeenCalledWith(
+                "name description price stock category brand images mainImage rating totalReviews isActive createdAt updatedAt"
+            );
 
         });
 
@@ -206,7 +224,11 @@ describe("product.controller", () => {
 
         it("returns 404 when the product does not exist", async () => {
 
-            Product.findById.mockResolvedValue(null);
+            Product.findById.mockReturnValue({
+                select: jest.fn().mockReturnValue({
+                    populate: jest.fn().mockResolvedValue(null)
+                })
+            });
 
             const req = { params: { id: "p1" } };
             const res = mockResponse();
@@ -220,13 +242,20 @@ describe("product.controller", () => {
         it("returns the product when found", async () => {
 
             const product = { _id: "p1", name: "Widget" };
-            Product.findById.mockResolvedValue(product);
+            const query = {
+                select: jest.fn().mockReturnThis(),
+                populate: jest.fn().mockResolvedValue(product)
+            };
+            Product.findById.mockReturnValue(query);
 
             const req = { params: { id: "p1" } };
             const res = mockResponse();
 
             await productController.getProductById(req, res);
 
+            expect(query.select).toHaveBeenCalledWith(
+                "name description price stock category brand images mainImage rating totalReviews isActive createdAt updatedAt"
+            );
             expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ success: true, data: product }));
 
         });
@@ -235,7 +264,11 @@ describe("product.controller", () => {
 
             const error = new Error("Cast to ObjectId failed");
             error.kind = "ObjectId";
-            Product.findById.mockRejectedValue(error);
+            Product.findById.mockReturnValue({
+                select: jest.fn().mockReturnValue({
+                    populate: jest.fn().mockRejectedValue(error)
+                })
+            });
 
             const req = { params: { id: "not-an-id" } };
             const res = mockResponse();

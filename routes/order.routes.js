@@ -10,6 +10,7 @@ const {
     checkout,
     getOrders,
     getAllOrders,
+    getOrderStats,
     getOrderById,
     updateOrderStatus,
     cancelOrder,
@@ -20,6 +21,8 @@ const {
 router.get("/", protect, getOrders);
 
 router.get("/admin/all", protect, authorize("admin"), getAllOrders);
+
+router.get("/admin/stats", protect, authorize("admin"), getOrderStats);
 
 router.get("/:id", protect, getOrderById);
 

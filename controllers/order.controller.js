@@ -7,6 +7,8 @@ const Product = require("../src/models/Product");
 const Address = require("../src/models/Address");
 const razorpay = require("../src/config/razorpay");
 const sendEmail = require("../utils/sendEmail");
+const { createUserNotification } = require("../utils/notification");
+// const { default: orders } = require("razorpay/dist/types/orders");
 
 /*
 Checkout
@@ -146,6 +148,46 @@ console.log(cart, ` carts`);
             totalAmount: grandTotal
 
         });
+
+        await createUserNotification({
+            userId,
+            title: "Order created",
+            message: paymentMethod === "CARD" || paymentMethod === "UPI"
+                ? `Your order #${order._id} was created and is awaiting payment confirmation.`
+                : `Your order #${order._id} has been placed successfully.`,
+            type: "order",
+            link: `/orders/${order._id}`,
+            metadata: {
+                orderId: order._id,
+                orderStatus: order.orderStatus,
+                paymentMethod
+            },
+            createdBy: userId
+        });
+
+        try {
+
+            const orderWithUser = await Order.findById(order._id).populate("user", "name email role");
+
+            if (orderWithUser.user && orderWithUser.user.role === "customer") {
+
+                const itemsHtml = orderItems
+                    .map(item => `<li>${item.name} x ${item.quantity} - ₹${item.subtotal}</li>`)
+                    .join("");
+
+                await sendEmail({
+                    to: orderWithUser.user.email,
+                    subject: `Order Confirmation - #${order._id}`,
+                    html: `<p>Hi ${orderWithUser.user.name},</p><p>Thank you for your order! Here's a summary:</p><ul>${itemsHtml}</ul><p><b>Total: ₹${grandTotal}</b></p><p>Payment Method: ${paymentMethod}</p><p>We'll notify you as your order status changes.</p>`
+                });
+
+            }
+
+        } catch (emailError) {
+
+            console.error("Failed to send order confirmation email:", emailError.message);
+
+        }
 
         if (paymentMethod === "CARD" || paymentMethod === "UPI") {
 
@@ -393,6 +435,39 @@ exports.verifyDeliveryOtp = async (req, res) => {
 
         await order.save();
 
+        await createUserNotification({
+            userId: order.user,
+            title: "Order delivered",
+            message: `Your order #${order._id} has been delivered successfully.`,
+            type: "order",
+            link: `/orders/${order._id}`,
+            metadata: {
+                orderId: order._id,
+                orderStatus: order.orderStatus
+            },
+            createdBy: req.user?.id || null
+        });
+
+        try {
+
+            const orderWithUser = await Order.findById(order._id).populate("user", "name email role");
+
+            if (orderWithUser.user && orderWithUser.user.role === "customer") {
+
+                await sendEmail({
+                    to: orderWithUser.user.email,
+                    subject: `Order Delivered - #${order._id}`,
+                    html: `<p>Hi ${orderWithUser.user.name},</p><p>Your order has been delivered successfully. We hope you enjoy your purchase!</p>`
+                });
+
+            }
+
+        } catch (emailError) {
+
+            console.error("Failed to send delivery confirmation email:", emailError.message);
+
+        }
+
         res.status(200).json({
 
             success: true,
@@ -450,12 +525,12 @@ exports.getAllOrders = async (req, res) => {
         const total = await Order.countDocuments(filter);
 
         const orders = await Order.find(filter)
-            .populate("user", "name email")
+            .populate("user", "name email phone role")
             .sort("-createdAt")
             .skip(skip)
             .limit(limit);
 
-        res.status(200).json({
+        res.status(200).json({ 
 
             success: true,
 
@@ -466,6 +541,90 @@ exports.getAllOrders = async (req, res) => {
             totalPages: Math.ceil(total / limit),
 
             data: orders
+
+        });
+
+    } catch (error) {
+
+        res.status(500).json({
+
+            success: false,
+
+            message: error.message
+
+        });
+
+    }
+
+};
+
+/*
+Get Order Stats (Admin)
+
+GET /api/orders/admin/stats
+*/
+
+exports.getOrderStats = async (req, res) => {
+
+    try { 
+
+
+        const [stats] = await Order.aggregate([
+
+            {
+                $facet: {
+
+                    delivered: [
+                        { $match: { orderStatus: "Delivered" } },
+                        { $count: "count" }
+                    ], 
+
+                 payment:[
+                    {
+                        $match:{paymentMethod:"COD"}
+                    },{
+                        $count:"count"
+                    }
+                 ],
+                 paymentCard:[
+                        { $match:{paymentMethod:"CARD"} },
+                        { $count:"count" }
+                    ],
+paymentUpi:[
+                        { $match:{paymentMethod:"UPI"} },
+                        { $count:"count" }
+                    ],      
+                    cancelled: [
+                        { $match: { orderStatus: "Cancelled" } },
+                        { $count: "count" }
+                    ],
+        
+totalItems: [
+                        { $unwind: "$items" },
+                        { $group: { _id: null, totalItems: { $sum: "$items.quantity" } } }
+                    ],
+                    totalAmount: [
+                        { $group: { _id: null, sum: { $sum: "$totalAmount" } } }
+                    ]
+ 
+                }
+            }
+
+        ]);
+
+        res.status(200).json({
+
+            success: true,
+
+            data: {
+                totalDelivered: stats.delivered[0]?.count || 0,
+                totalCancelled: stats.cancelled[0]?.count || 0,
+                totalCOD: stats.payment?.[0]?.count || 0,
+                totalCard: stats.paymentCard?.[0]?.count || 0,
+                totalUpi: stats.paymentUpi?.[0]?.count || 0,
+                totalItems: stats.totalItems?.[0]?.totalItems || 0,
+                totalAmount: stats.totalAmount[0]?.sum || 0
+            }
 
         });
 
@@ -580,6 +739,19 @@ exports.updateOrderStatus = async (req, res) => {
 
         await order.save();
 
+        await createUserNotification({
+            userId: order.user,
+            title: "Order status updated",
+            message: `Your order #${order._id} status is now ${order.orderStatus}.`,
+            type: "order",
+            link: `/orders/${order._id}`,
+            metadata: {
+                orderId: order._id,
+                orderStatus: order.orderStatus
+            },
+            createdBy: req.user?.id || null
+        });
+
         res.status(200).json({
 
             success: true,
@@ -675,6 +847,39 @@ exports.cancelOrder = async (req, res) => {
         order.orderStatus = "Cancelled";
 
         await order.save();
+
+        await createUserNotification({
+            userId: order.user,
+            title: "Order cancelled",
+            message: `Your order #${order._id} has been cancelled.`,
+            type: "order",
+            link: `/orders/${order._id}`,
+            metadata: {
+                orderId: order._id,
+                orderStatus: order.orderStatus
+            },
+            createdBy: req.user?.id || null
+        });
+
+        try {
+
+            const orderWithUser = await Order.findById(order._id).populate("user", "name email role");
+
+            if (orderWithUser.user && orderWithUser.user.role === "customer") {
+
+                await sendEmail({
+                    to: orderWithUser.user.email,
+                    subject: `Order Cancelled - #${order._id}`,
+                    html: `<p>Hi ${orderWithUser.user.name},</p><p>Your order has been cancelled as requested.</p><p>If a payment was already made, any applicable refund will be processed shortly.</p>`
+                });
+
+            }
+
+        } catch (emailError) {
+
+            console.error("Failed to send order cancellation email:", emailError.message);
+
+        }
 
         res.status(200).json({
 

@@ -123,7 +123,7 @@ exports.login = async (req, res) => {
         const { email, password } = req.body;
 
         const user = await User.findOne({ email: email.toLowerCase() }).select("+password");
-// console.log(user, ' user')
+console.log(user, ' user')
         if (!user) {
 
             logSignInActivity({

@@ -9,7 +9,7 @@ const authorize = (...allowedRoles) => {
             });
         }
         next();
-    };
+    }; 
 };
 
 module.exports = authorize;
