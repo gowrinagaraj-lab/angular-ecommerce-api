@@ -28,7 +28,8 @@
     "morgan": "^1.11.0",
     "multer": "^2.2.0",
     "nodemailer": "^9.0.4",
-    "razorpay": "^2.9.8"
+    "razorpay": "^2.9.8",
+    "socket.io": "^4.8.3"
   },
   "devDependencies": {
     "jest": "^30.4.2",

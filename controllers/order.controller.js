@@ -1,6 +1,5 @@
 const crypto = require("crypto");
 const { validationResult } = require("express-validator");
-
 const Cart = require("../src/models/Cart");
 const Order = require("../src/models/Order");
 const Product = require("../src/models/Product");
@@ -85,10 +84,13 @@ exports.checkout = async (req, res) => {
 
         }
 
-        const cart = await Cart.findOne({
-            user: userId
-        }).populate("items.product");
-console.log(cart, ` carts`);
+const cart = await Cart.findOne({
+    user: userId
+});
+
+const pp=  await cart.populate("items.product");
+console.log(cart, 'cart' );
+console.log(pp, 'populated cart' );
         if (!cart || cart.items.length === 0) {
 
             return res.status(400).json({

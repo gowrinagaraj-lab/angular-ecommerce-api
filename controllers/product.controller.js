@@ -237,7 +237,9 @@ exports.updateProduct = async (req, res) => {
       message: "Product updated successfully",
       data: product
     });
-
+io.emit("productUpdated", {
+  message: "Product updated"
+});
   } catch (error) {
     if (error.code === 11000) {
       const field = Object.keys(error.keyValue)[0];
