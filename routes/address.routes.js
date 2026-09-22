@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 const { body, param } = require("express-validator");
 
-const protect = require("../src/middleware/auth.middleware");
+const protect = require("../src/middleware/auth.middleware"); 
 const INDIAN_STATES = require("../src/constants/indianStates");
 
 const {

@@ -15,7 +15,7 @@ exports.addToCart = async (req, res) => {
 
         const errors = validationResult(req);
 
-        if (!errors.isEmpty()) {
+        if (!errors.isEmpty()) { 
 
             return res.status(400).json({
                 success: false,
@@ -40,7 +40,6 @@ console.log(req.user, ' userId')
         }
 
         let cart = await Cart.findOne({ user: userId });
-
         if (!cart) {
 
             cart = new Cart({

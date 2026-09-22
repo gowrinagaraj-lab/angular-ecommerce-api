@@ -27,6 +27,8 @@ app.set("io", io);
 // changes (API-driven or manual) and broadcast them over the socket.
 connectDB().then(() => {
     startProductChangeStream(io);
+}).catch((error) => {
+    console.error("Product change stream could not start:", error.message);
 });
 
 // Socket connection
