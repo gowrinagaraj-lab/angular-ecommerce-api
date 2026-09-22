@@ -5,8 +5,7 @@ const { Server } = require("socket.io");
 
 const app = require("./app");
 const connectDB = require("./config/db");
-
-connectDB();
+const startProductChangeStream = require("./watchers/productChangeStream");
 
 const PORT = process.env.PORT || 5000;
 
@@ -19,6 +18,15 @@ const io = new Server(server, {
         origin: "http://localhost:4200",
         methods: ["GET", "POST", "PUT", "DELETE"]
     }
+});
+
+// Make io accessible to controllers via req.app.get("io")
+app.set("io", io);
+
+// Connect to MongoDB, then start watching the products collection for
+// changes (API-driven or manual) and broadcast them over the socket.
+connectDB().then(() => {
+    startProductChangeStream(io);
 });
 
 // Socket connection

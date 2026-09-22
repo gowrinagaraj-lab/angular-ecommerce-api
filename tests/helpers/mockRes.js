@@ -5,4 +5,8 @@ const mockResponse = () => {
     return res;
 };
 
-module.exports = { mockResponse };
+const mockIoApp = () => ({
+    get: jest.fn().mockReturnValue({ emit: jest.fn() })
+});
+
+module.exports = { mockResponse, mockIoApp };

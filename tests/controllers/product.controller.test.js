@@ -5,7 +5,7 @@ const mongoose = require("mongoose");
 const Product = require("../../src/models/Product");
 const Category = require("../../src/models/Category");
 const productController = require("../../controllers/product.controller");
-const { mockResponse } = require("../helpers/mockRes");
+const { mockResponse, mockIoApp } = require("../helpers/mockRes");
 
 describe("product.controller", () => {
 
@@ -62,12 +62,13 @@ describe("product.controller", () => {
             Category.findById.mockResolvedValue({ _id: validId });
             Product.create.mockResolvedValue({ _id: "p1", name: "Widget", category: validId });
 
-            const req = { body: { name: "Widget", category: validId } };
+            const req = { body: { name: "Widget", category: validId }, app: mockIoApp() };
             const res = mockResponse();
 
             await productController.createProduct(req, res);
 
             expect(res.status).toHaveBeenCalledWith(201);
+            expect(req.app.get).toHaveBeenCalledWith("io");
 
         });
 
@@ -317,12 +318,13 @@ describe("product.controller", () => {
             const updated = { _id: "p1", name: "Widget" };
             Product.findByIdAndUpdate.mockResolvedValue(updated);
 
-            const req = { params: { id: "p1" }, body: { name: "Widget" } };
+            const req = { params: { id: "p1" }, body: { name: "Widget" }, app: mockIoApp() };
             const res = mockResponse();
 
             await productController.updateProduct(req, res);
 
             expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ success: true, data: updated }));
+            expect(req.app.get).toHaveBeenCalledWith("io");
 
         });
 
@@ -364,12 +366,13 @@ describe("product.controller", () => {
 
             Product.findByIdAndDelete.mockResolvedValue({ _id: "p1" });
 
-            const req = { params: { id: "p1" } };
+            const req = { params: { id: "p1" }, app: mockIoApp() };
             const res = mockResponse();
 
             await productController.deleteProduct(req, res);
 
             expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ success: true }));
+            expect(req.app.get).toHaveBeenCalledWith("io");
 
         });
 

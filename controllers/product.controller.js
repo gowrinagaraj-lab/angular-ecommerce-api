@@ -237,9 +237,6 @@ exports.updateProduct = async (req, res) => {
       message: "Product updated successfully",
       data: product
     });
-io.emit("productUpdated", {
-  message: "Product updated"
-});
   } catch (error) {
     if (error.code === 11000) {
       const field = Object.keys(error.keyValue)[0];
@@ -271,6 +268,11 @@ exports.deleteProduct = async (req, res) => {
         message: "Product not found"
       });
     }
+
+    req.app.get("io").emit("productDeleted", {
+      message: "Product deleted",
+      data: { _id: product._id }
+    });
 
     res.json({
       success: true,
