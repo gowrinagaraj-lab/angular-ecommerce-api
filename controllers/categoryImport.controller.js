@@ -42,11 +42,11 @@ exports.createImportJob = async (req, res) => {
     const validation = await inspectImportFile(filePath);
 
     if (!validation.valid) {
-      fs.unlink(filePath, () => {});
+      fs.unlink(filePath, () => {}); 
 
       return res.status(400).json({
         success: false,
-        message: validation.reason
+        message: validation.reason 
       });
     }
 

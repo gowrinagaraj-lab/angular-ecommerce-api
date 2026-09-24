@@ -5,6 +5,8 @@ const cors = require("cors");
 const helmet = require("helmet");
 const morgan = require("morgan");
 
+const { notFoundHandler, errorHandler } = require("./middleware/errorHandler");
+
 const app = express();
 
 app.use(express.json());
@@ -38,5 +40,8 @@ app.use("/api/payments", require("./../routes/payment.routes"));
 app.use("/api/notifications", require("./../routes/notification.routes"));
 app.use("/api/chat", require("./../routes/chat.routes"));
 app.use("/api/reviews", require("./../routes/review.routes"));
+
+app.use(notFoundHandler);
+app.use(errorHandler);
 
 module.exports = app;

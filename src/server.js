@@ -7,10 +7,29 @@ const app = require("./app");
 const connectDB = require("./config/db");
 const startProductChangeStream = require("./watchers/productChangeStream");
 
-const PORT = process.env.PORT || 5000;
+const DEFAULT_PORT = 5000;
+const requestedPort = Number(process.env.PORT) || DEFAULT_PORT;
 
 // Create HTTP server using Express app
 const server = http.createServer(app);
+
+const startServer = (port) => {
+    const nextPort = Number(port) || DEFAULT_PORT;
+
+    server.listen(nextPort, () => {
+        console.log(`Server running on port ${nextPort}`);
+    }).on("error", (error) => {
+        if (error.code === "EADDRINUSE") {
+            const fallbackPort = nextPort + 1;
+            console.warn(`Port ${nextPort} is already in use. Retrying on port ${fallbackPort}...`);
+            startServer(fallbackPort);
+            return;
+        }
+
+        console.error(`Unable to start server on port ${nextPort}:`, error.message);
+        process.exit(1);
+    });
+};
 
 // Create Socket.IO server
 const io = new Server(server, {
@@ -42,6 +61,4 @@ io.on("connection", (socket) => {
 
 });
 
-server.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-});
+startServer(requestedPort);

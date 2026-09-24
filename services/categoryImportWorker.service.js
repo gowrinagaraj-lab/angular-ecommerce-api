@@ -7,7 +7,7 @@ const { readImportRows } = require("./categoryImportRowReader.service");
 // cancellation and progress feel unresponsive. 5 is a reasonable POC middle ground -
 // tunable, and exactly why progress can jump (0, 0, 0, 40, 70, 100) instead of climbing
 // one row at a time.
-const PROGRESS_UPDATE_BATCH_SIZE = 5;
+const PROGRESS_UPDATE_BATCH_SIZE = 5; 
 
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -74,7 +74,6 @@ upload HTTP response has already been sent.
 */
 const processImportJob = async (jobId) => {
   const job = await ImportJob.findById(jobId);
-
   // Guards against: job not found, or already moved out of "queued" (e.g. cancelled
   // before this function got a chance to run).
   if (!job || job.status !== "queued") {
