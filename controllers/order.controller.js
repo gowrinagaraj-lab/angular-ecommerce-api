@@ -7,7 +7,7 @@ const Address = require("../src/models/Address");
 const razorpay = require("../src/config/razorpay");
 const sendEmail = require("../utils/sendEmail");
 const { createUserNotification } = require("../utils/notification");
-// const { default: orders } = require("razorpay/dist/types/orders");
+const { sendSuccess, sendError } = require("../src/utils/response");
 
 /*
 Checkout
@@ -23,10 +23,7 @@ exports.checkout = async (req, res) => {
 
         if (!errors.isEmpty()) {
 
-            return res.status(400).json({
-                success: false,
-                message: errors.array()[0].msg
-            });
+            return sendError(res, 400, errors.array()[0].msg);
 
         }
 
@@ -42,10 +39,7 @@ exports.checkout = async (req, res) => {
 
             if (!savedAddress) {
 
-                return res.status(404).json({
-                    success: false,
-                    message: "Address not found"
-                });
+                return sendError(res, 404, "Address not found");
 
             }
 
@@ -65,10 +59,7 @@ exports.checkout = async (req, res) => {
 
             if (!defaultAddress) {
 
-                return res.status(400).json({
-                    success: false,
-                    message: "shippingAddress or addressId is required, and no default address was found"
-                });
+                return sendError(res, 400, "shippingAddress or addressId is required, and no default address was found");
 
             }
 
@@ -93,10 +84,7 @@ console.log(cart, 'cart' );
 console.log(pp, 'populated cart' );
         if (!cart || cart.items.length === 0) {
 
-            return res.status(400).json({
-                success: false,
-                message: "Cart is empty"
-            });
+            return sendError(res, 400, "Cart is empty");
 
         }
 
@@ -110,10 +98,7 @@ console.log(pp, 'populated cart' );
 
             if (product.stock < item.quantity) {
 
-                return res.status(400).json({
-                    success: false,
-                    message: `${product.name} is out of stock`
-                });
+                return sendError(res, 400, `${product.name} is out of stock`);
 
             }
 
@@ -135,7 +120,7 @@ console.log(pp, 'populated cart' );
 
             });
 
-        }
+        } 
 
         const order = await Order.create({
 
@@ -207,9 +192,7 @@ console.log(pp, 'populated cart' );
 
             await order.save();
 
-            return res.status(201).json({
-
-                success: true,
+            return sendSuccess(res, 201, {
 
                 message: "Order created, awaiting payment",
 
@@ -243,12 +226,9 @@ console.log(pp, 'populated cart' );
         }
 
         cart.items = [];
-
         await cart.save();
 
-        res.status(201).json({
-
-            success: true,
+        sendSuccess(res, 201, {
 
             message: "Order placed successfully",
 
@@ -258,13 +238,7 @@ console.log(pp, 'populated cart' );
 
     } catch (error) {
 
-        res.status(500).json({
-
-            success: false,
-
-            message: error.message
-
-        });
+        sendError(res, 500, error.message);
 
     }
 
@@ -284,28 +258,19 @@ exports.generateDeliveryOtp = async (req, res) => {
 
         if (!order) {
 
-            return res.status(404).json({
-                success: false,
-                message: "Order not found"
-            });
+            return sendError(res, 404, "Order not found");
 
         }
 
         if (order.orderStatus === "Delivered") {
 
-            return res.status(400).json({
-                success: false,
-                message: "Order is already delivered"
-            });
+            return sendError(res, 400, "Order is already delivered");
 
         }
 
         if (order.orderStatus === "Cancelled") {
 
-            return res.status(400).json({
-                success: false,
-                message: "Cannot generate a delivery OTP for a cancelled order"
-            });
+            return sendError(res, 400, "Cannot generate a delivery OTP for a cancelled order");
 
         }
 
@@ -333,16 +298,11 @@ exports.generateDeliveryOtp = async (req, res) => {
 
             await order.save();
 
-            return res.status(500).json({
-                success: false,
-                message: "Failed to send delivery OTP, please try again later"
-            });
+            return sendError(res, 500, "Failed to send delivery OTP, please try again later");
 
         }
 
-        res.status(200).json({
-
-            success: true,
+        sendSuccess(res, 200, {
 
             message: "Delivery OTP sent to customer"
 
@@ -350,13 +310,7 @@ exports.generateDeliveryOtp = async (req, res) => {
 
     } catch (error) {
 
-        res.status(500).json({
-
-            success: false,
-
-            message: error.message
-
-        });
+        sendError(res, 500, error.message);
 
     }
 
@@ -376,10 +330,7 @@ exports.verifyDeliveryOtp = async (req, res) => {
 
         if (!errors.isEmpty()) {
 
-            return res.status(400).json({
-                success: false,
-                message: errors.array()[0].msg
-            });
+            return sendError(res, 400, errors.array()[0].msg);
 
         }
 
@@ -387,28 +338,19 @@ exports.verifyDeliveryOtp = async (req, res) => {
 
         if (!order) {
 
-            return res.status(404).json({
-                success: false,
-                message: "Order not found"
-            });
+            return sendError(res, 404, "Order not found");
 
         }
 
         if (order.orderStatus === "Delivered") {
 
-            return res.status(400).json({
-                success: false,
-                message: "Order is already delivered"
-            });
+            return sendError(res, 400, "Order is already delivered");
 
         }
 
         if (!order.deliveryOtp || !order.deliveryOtpExpire || order.deliveryOtpExpire < Date.now()) {
 
-            return res.status(400).json({
-                success: false,
-                message: "OTP has expired or was not generated, please generate a new one"
-            });
+            return sendError(res, 400, "OTP has expired or was not generated, please generate a new one");
 
         }
 
@@ -416,10 +358,7 @@ exports.verifyDeliveryOtp = async (req, res) => {
 
         if (hashedOtp !== order.deliveryOtp) {
 
-            return res.status(400).json({
-                success: false,
-                message: "Invalid OTP"
-            });
+            return sendError(res, 400, "Invalid OTP");
 
         }
 
@@ -470,9 +409,7 @@ exports.verifyDeliveryOtp = async (req, res) => {
 
         }
 
-        res.status(200).json({
-
-            success: true,
+        sendSuccess(res, 200, {
 
             message: "Order marked as delivered",
 
@@ -482,13 +419,7 @@ exports.verifyDeliveryOtp = async (req, res) => {
 
     } catch (error) {
 
-        res.status(500).json({
-
-            success: false,
-
-            message: error.message
-
-        });
+        sendError(res, 500, error.message);
 
     }
 
@@ -532,9 +463,7 @@ exports.getAllOrders = async (req, res) => {
             .skip(skip)
             .limit(limit);
 
-        res.status(200).json({ 
-
-            success: true,
+        sendSuccess(res, 200, {
 
             total,
 
@@ -548,13 +477,7 @@ exports.getAllOrders = async (req, res) => {
 
     } catch (error) {
 
-        res.status(500).json({
-
-            success: false,
-
-            message: error.message
-
-        });
+        sendError(res, 500, error.message);
 
     }
 
@@ -568,7 +491,7 @@ GET /api/orders/admin/stats
 
 exports.getOrderStats = async (req, res) => {
 
-    try { 
+    try {
 
 
         const [stats] = await Order.aggregate([
@@ -579,7 +502,7 @@ exports.getOrderStats = async (req, res) => {
                     delivered: [
                         { $match: { orderStatus: "Delivered" } },
                         { $count: "count" }
-                    ], 
+                    ],
 
                  payment:[
                     {
@@ -595,12 +518,12 @@ exports.getOrderStats = async (req, res) => {
 paymentUpi:[
                         { $match:{paymentMethod:"UPI"} },
                         { $count:"count" }
-                    ],      
+                    ],
                     cancelled: [
                         { $match: { orderStatus: "Cancelled" } },
                         { $count: "count" }
                     ],
-        
+
 totalItems: [
                         { $unwind: "$items" },
                         { $group: { _id: null, totalItems: { $sum: "$items.quantity" } } }
@@ -608,15 +531,13 @@ totalItems: [
                     totalAmount: [
                         { $group: { _id: null, sum: { $sum: "$totalAmount" } } }
                     ]
- 
+
                 }
             }
 
         ]);
 
-        res.status(200).json({
-
-            success: true,
+        sendSuccess(res, 200, {
 
             data: {
                 totalDelivered: stats.delivered[0]?.count || 0,
@@ -632,13 +553,7 @@ totalItems: [
 
     } catch (error) {
 
-        res.status(500).json({
-
-            success: false,
-
-            message: error.message
-
-        });
+        sendError(res, 500, error.message);
 
     }
 
@@ -658,25 +573,17 @@ exports.getOrderById = async (req, res) => {
 
         if (!order) {
 
-            return res.status(404).json({
-                success: false,
-                message: "Order not found"
-            });
+            return sendError(res, 404, "Order not found");
 
         }
 
         if (order.user.toString() !== req.user.id && req.user.role !== "admin") {
 
-            return res.status(403).json({
-                success: false,
-                message: "Not authorized to view this order"
-            });
+            return sendError(res, 403, "Not authorized to view this order");
 
         }
 
-        res.status(200).json({
-
-            success: true,
+        sendSuccess(res, 200, {
 
             data: order
 
@@ -684,13 +591,7 @@ exports.getOrderById = async (req, res) => {
 
     } catch (error) {
 
-        res.status(500).json({
-
-            success: false,
-
-            message: error.message
-
-        });
+        sendError(res, 500, error.message);
 
     }
 
@@ -710,10 +611,7 @@ exports.updateOrderStatus = async (req, res) => {
 
         if (!errors.isEmpty()) {
 
-            return res.status(400).json({
-                success: false,
-                message: errors.array()[0].msg
-            });
+            return sendError(res, 400, errors.array()[0].msg);
 
         }
 
@@ -721,19 +619,13 @@ exports.updateOrderStatus = async (req, res) => {
 
         if (!order) {
 
-            return res.status(404).json({
-                success: false,
-                message: "Order not found"
-            });
+            return sendError(res, 404, "Order not found");
 
         }
 
         if (order.orderStatus === "Delivered" || order.orderStatus === "Cancelled") {
 
-            return res.status(400).json({
-                success: false,
-                message: `Order is already ${order.orderStatus.toLowerCase()} and its status can no longer be changed`
-            });
+            return sendError(res, 400, `Order is already ${order.orderStatus.toLowerCase()} and its status can no longer be changed`);
 
         }
 
@@ -754,9 +646,7 @@ exports.updateOrderStatus = async (req, res) => {
             createdBy: req.user?.id || null
         });
 
-        res.status(200).json({
-
-            success: true,
+        sendSuccess(res, 200, {
 
             message: "Order status updated successfully",
 
@@ -766,13 +656,7 @@ exports.updateOrderStatus = async (req, res) => {
 
     } catch (error) {
 
-        res.status(500).json({
-
-            success: false,
-
-            message: error.message
-
-        });
+        sendError(res, 500, error.message);
 
     }
 
@@ -792,37 +676,25 @@ exports.cancelOrder = async (req, res) => {
 
         if (!order) {
 
-            return res.status(404).json({
-                success: false,
-                message: "Order not found"
-            });
+            return sendError(res, 404, "Order not found");
 
         }
 
         if (order.user.toString() !== req.user.id && req.user.role !== "admin") {
 
-            return res.status(403).json({
-                success: false,
-                message: "Not authorized to cancel this order"
-            });
+            return sendError(res, 403, "Not authorized to cancel this order");
 
         }
 
         if (order.orderStatus === "Delivered" || order.orderStatus === "Cancelled") {
 
-            return res.status(400).json({
-                success: false,
-                message: `Order is already ${order.orderStatus.toLowerCase()} and cannot be cancelled`
-            });
+            return sendError(res, 400, `Order is already ${order.orderStatus.toLowerCase()} and cannot be cancelled`);
 
         }
 
         if (order.orderStatus === "Shipped") {
 
-            return res.status(400).json({
-                success: false,
-                message: "Order has already shipped and can no longer be cancelled"
-            });
+            return sendError(res, 400, "Order has already shipped and can no longer be cancelled");
 
         }
 
@@ -883,9 +755,7 @@ exports.cancelOrder = async (req, res) => {
 
         }
 
-        res.status(200).json({
-
-            success: true,
+        sendSuccess(res, 200, {
 
             message: "Order cancelled successfully",
 
@@ -895,13 +765,7 @@ exports.cancelOrder = async (req, res) => {
 
     } catch (error) {
 
-        res.status(500).json({
-
-            success: false,
-
-            message: error.message
-
-        });
+        sendError(res, 500, error.message);
 
     }
 
@@ -932,9 +796,7 @@ exports.getOrders = async (req, res) => {
             .skip(skip)
             .limit(limit);
 
-        res.status(200).json({
-
-            success: true,
+        sendSuccess(res, 200, {
 
             total,
 
@@ -948,13 +810,7 @@ exports.getOrders = async (req, res) => {
 
     } catch (error) {
 
-        res.status(500).json({
-
-            success: false,
-
-            message: error.message
-
-        });
+        sendError(res, 500, error.message);
 
     }
 

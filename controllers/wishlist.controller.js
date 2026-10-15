@@ -2,6 +2,7 @@ const { validationResult } = require("express-validator");
 
 const Wishlist = require("../src/models/Wishlist");
 const Product = require("../src/models/Product");
+const { sendSuccess, sendError } = require("../src/utils/response");
 
 /*
 Get User Wishlist
@@ -15,11 +16,7 @@ exports.getWishlist = async (req, res) => {
         }).populate("products");
 
         if (!wishlist) {
-            return res.status(200).json({
-                success: true,
-                count: 0,
-                data: []
-            });
+            return sendSuccess(res, 200, { count: 0, data: [] });
         }
 
         // Filter out null values in case referenced products were deleted from DB
@@ -31,17 +28,10 @@ exports.getWishlist = async (req, res) => {
             await wishlist.save();
         }
 
-        res.status(200).json({
-            success: true,
-            count: wishlist.products.length,
-            data: wishlist.products
-        });
+        sendSuccess(res, 200, { count: wishlist.products.length, data: wishlist.products });
 
     } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
+        sendError(res, 500, error.message);
     }
 };
 
@@ -55,10 +45,7 @@ exports.addToWishlist = async (req, res) => {
         const errors = validationResult(req);
 
         if (!errors.isEmpty()) {
-            return res.status(400).json({
-                success: false,
-                message: errors.array()[0].msg
-            });
+            return sendError(res, 400, errors.array()[0].msg);
         }
 
         const userId = req.user.id;
@@ -67,10 +54,7 @@ exports.addToWishlist = async (req, res) => {
         const product = await Product.findById(productId);
 
         if (!product) {
-            return res.status(404).json({
-                success: false,
-                message: "Product not found"
-            });
+            return sendError(res, 404, "Product not found");
         }
 
         let wishlist = await Wishlist.findOne({ user: userId });
@@ -88,26 +72,16 @@ exports.addToWishlist = async (req, res) => {
         );
 
         if (exists) {
-            return res.status(400).json({
-                success: false,
-                message: "Product already in wishlist"
-            });
+            return sendError(res, 400, "Product already in wishlist");
         }
 
         wishlist.products.push(productId);
         await wishlist.save();
 
-        res.status(200).json({
-            success: true,
-            message: "Product added to wishlist",
-            data: wishlist
-        });
+        sendSuccess(res, 200, { message: "Product added to wishlist", data: wishlist });
 
     } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
+        sendError(res, 500, error.message);
     }
 };
 
@@ -121,10 +95,7 @@ exports.removeFromWishlist = async (req, res) => {
         const errors = validationResult(req);
 
         if (!errors.isEmpty()) {
-            return res.status(400).json({
-                success: false,
-                message: errors.array()[0].msg
-            });
+            return sendError(res, 400, errors.array()[0].msg);
         }
 
         const wishlist = await Wishlist.findOne({
@@ -132,10 +103,7 @@ exports.removeFromWishlist = async (req, res) => {
         });
 
         if (!wishlist) {
-            return res.status(404).json({
-                success: false,
-                message: "Wishlist not found"
-            });
+            return sendError(res, 404, "Wishlist not found");
         }
 
         wishlist.products = wishlist.products.filter(
@@ -144,17 +112,10 @@ exports.removeFromWishlist = async (req, res) => {
 
         await wishlist.save();
 
-        res.status(200).json({
-            success: true,
-            message: "Product removed from wishlist",
-            data: wishlist
-        });
+        sendSuccess(res, 200, { message: "Product removed from wishlist", data: wishlist });
 
     } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
+        sendError(res, 500, error.message);
     }
 };
 
@@ -170,24 +131,15 @@ exports.clearWishlist = async (req, res) => {
         });
 
         if (!wishlist) {
-            return res.status(404).json({
-                success: false,
-                message: "Wishlist not found"
-            });
+            return sendError(res, 404, "Wishlist not found");
         }
 
         wishlist.products = [];
         await wishlist.save();
 
-        res.status(200).json({
-            success: true,
-            message: "Wishlist cleared"
-        });
+        sendSuccess(res, 200, { message: "Wishlist cleared" });
 
     } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
+        sendError(res, 500, error.message);
     }
 };

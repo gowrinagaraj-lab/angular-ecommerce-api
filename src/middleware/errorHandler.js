@@ -1,4 +1,5 @@
 const { AppError } = require("../utils/AppError");
+const { sendError } = require("../utils/response");
 
 const notFoundHandler = (req, res, next) => {
   next(new AppError(`Route ${req.originalUrl} not found`, 404));
@@ -13,10 +14,7 @@ const errorHandler = (err, req, res, next) => {
     console.error(err.stack || err);
   }
 
-  res.status(statusCode).json({
-    success: false,
-    message
-  });
+  sendError(res, statusCode, message);
 };
 
 module.exports = { 

@@ -1,6 +1,6 @@
 const { validationResult } = require("express-validator");
-
 const Address = require("../src/models/Address");
+const { sendSuccess, sendError } = require("../src/utils/response");
 
 /*
 Get User Addresses
@@ -11,17 +11,10 @@ exports.getAddresses = async (req, res) => {
     try {
         const addresses = await Address.find({ user: req.user.id }).sort({ isDefault: -1, createdAt: -1 });
 
-        res.status(200).json({
-            success: true,
-            count: addresses.length,
-            data: addresses
-        });
+        sendSuccess(res, 200, { count: addresses.length, data: addresses });
 
     } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
+        sendError(res, 500, error.message);
     }
 };
 
@@ -35,11 +28,7 @@ exports.addAddress = async (req, res) => {
         const errors = validationResult(req);
 
         if (!errors.isEmpty()) {
-     
-            return res.status(400).json({
-                success: false,
-                message: errors.array()[0].msg
-            });
+            return sendError(res, 400, errors.array()[0].msg);
         }
 
         const userId = req.user.id;
@@ -48,11 +37,10 @@ exports.addAddress = async (req, res) => {
 
         const existingCount = await Address.countDocuments({ user: userId });
 
-// return  false
         const shouldBeDefault = isDefault === true || existingCount === 0;
 
         if (shouldBeDefault) {
-             
+
             await Address.updateMany({ user: userId }, { isDefault: false });
         }
 
@@ -69,17 +57,10 @@ exports.addAddress = async (req, res) => {
             isDefault: shouldBeDefault
         });
 
-        res.status(201).json({
-            success: true,
-            message: "Address added successfully",
-            data: newAddress
-        });
+        sendSuccess(res, 201, { message: "Address added successfully", data: newAddress });
 
     } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
+        sendError(res, 500, error.message);
     }
 };
 
@@ -93,21 +74,15 @@ exports.updateAddress = async (req, res) => {
         const errors = validationResult(req);
 
         if (!errors.isEmpty()) {
-            return res.status(400).json({
-                success: false,
-                message: errors.array()[0].msg
-            });
+            return sendError(res, 400, errors.array()[0].msg);
         }
-console.log("Request body:", req.user.id);
+
         const userId = req.user.id;
 
         const existingAddress = await Address.findOne({ _id: req.params.addressId, user: userId });
 
         if (!existingAddress) {
-            return res.status(404).json({
-                success: false,
-                message: "Address not found"
-            });
+            return sendError(res, 404, "Address not found");
         }
 
         const { fullName, phone, address, city, state, country, pincode, location, isDefault } = req.body;
@@ -128,17 +103,10 @@ console.log("Request body:", req.user.id);
 
         await existingAddress.save();
 
-        res.status(200).json({
-            success: true,
-            message: "Address updated successfully",
-            data: existingAddress
-        });
+        sendSuccess(res, 200, { message: "Address updated successfully", data: existingAddress });
 
     } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
+        sendError(res, 500, error.message);
     }
 };
 
@@ -154,10 +122,7 @@ exports.deleteAddress = async (req, res) => {
         const existingAddress = await Address.findOne({ _id: req.params.addressId, user: userId });
 
         if (!existingAddress) {
-            return res.status(404).json({
-                success: false,
-                message: "Address not found"
-            });
+            return sendError(res, 404, "Address not found");
         }
 
         const wasDefault = existingAddress.isDefault;
@@ -173,16 +138,10 @@ exports.deleteAddress = async (req, res) => {
             }
         }
 
-        res.status(200).json({
-            success: true,
-            message: "Address deleted successfully"
-        });
+        sendSuccess(res, 200, { message: "Address deleted successfully" });
 
     } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
+        sendError(res, 500, error.message);
     }
 };
 
@@ -198,10 +157,7 @@ exports.setDefaultAddress = async (req, res) => {
         const existingAddress = await Address.findOne({ _id: req.params.addressId, user: userId });
 
         if (!existingAddress) {
-            return res.status(404).json({
-                success: false,
-                message: "Address not found"
-            });
+            return sendError(res, 404, "Address not found");
         }
 
         await Address.updateMany({ user: userId }, { isDefault: false });
@@ -209,16 +165,9 @@ exports.setDefaultAddress = async (req, res) => {
         existingAddress.isDefault = true;
         await existingAddress.save();
 
-        res.status(200).json({
-            success: true,
-            message: "Default address updated",
-            data: existingAddress
-        });
+        sendSuccess(res, 200, { message: "Default address updated", data: existingAddress });
 
     } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
+        sendError(res, 500, error.message);
     }
 };

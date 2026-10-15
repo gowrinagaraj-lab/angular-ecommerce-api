@@ -4,6 +4,7 @@ const mongoose = require("mongoose");
 const ImportJob = require("../src/models/ImportJob");
 const { inspectImportFile } = require("../services/categoryImportFile.service");
 const { processImportJob } = require("../services/categoryImportWorker.service");
+const { sendSuccess, sendError } = require("../src/utils/response");
 
 const TERMINAL_STATUSES = ["completed", "failed", "cancelled"];
 
@@ -42,12 +43,9 @@ exports.createImportJob = async (req, res) => {
     const validation = await inspectImportFile(filePath);
 
     if (!validation.valid) {
-      fs.unlink(filePath, () => {}); 
+      fs.unlink(filePath, () => {});
 
-      return res.status(400).json({
-        success: false,
-        message: validation.reason 
-      });
+      return sendError(res, 400, validation.reason);
     }
 
     const job = await ImportJob.create({
@@ -58,8 +56,7 @@ exports.createImportJob = async (req, res) => {
       totalRecords: validation.totalRecords
     });
 
-    res.status(202).json({
-      success: true,
+    sendSuccess(res, 202, {
       message: "Import job created. Processing will begin shortly.",
       data: { jobId: job._id, status: job.status }
     });
@@ -73,10 +70,7 @@ exports.createImportJob = async (req, res) => {
   } catch (error) {
     fs.unlink(filePath, () => {});
 
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    sendError(res, 500, error.message);
   }
 };
 
@@ -88,31 +82,19 @@ exports.getImportJobStatus = async (req, res) => {
   const { jobId } = req.params;
 
   if (!mongoose.Types.ObjectId.isValid(jobId)) {
-    return res.status(400).json({
-      success: false,
-      message: "Invalid job ID format"
-    });
+    return sendError(res, 400, "Invalid job ID format");
   }
 
   try {
     const job = await ImportJob.findById(jobId);
 
     if (!job) {
-      return res.status(404).json({
-        success: false,
-        message: "Import job not found"
-      });
+      return sendError(res, 404, "Import job not found");
     }
 
-    res.json({
-      success: true,
-      data: formatJobResponse(job)
-    });
+    sendSuccess(res, 200, { data: formatJobResponse(job) });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    sendError(res, 500, error.message);
   }
 };
 
@@ -128,27 +110,18 @@ exports.cancelImportJob = async (req, res) => {
   const { jobId } = req.params;
 
   if (!mongoose.Types.ObjectId.isValid(jobId)) {
-    return res.status(400).json({
-      success: false,
-      message: "Invalid job ID format"
-    });
+    return sendError(res, 400, "Invalid job ID format");
   }
 
   try {
     const job = await ImportJob.findById(jobId);
 
     if (!job) {
-      return res.status(404).json({
-        success: false,
-        message: "Import job not found"
-      });
+      return sendError(res, 404, "Import job not found");
     }
 
     if (TERMINAL_STATUSES.includes(job.status)) {
-      return res.status(400).json({
-        success: false,
-        message: `Job is already ${job.status} and cannot be cancelled.`
-      });
+      return sendError(res, 400, `Job is already ${job.status} and cannot be cancelled.`);
     }
 
     job.status = "cancelled";
@@ -156,15 +129,8 @@ exports.cancelImportJob = async (req, res) => {
     job.completedAt = new Date();
     await job.save();
 
-    res.json({
-      success: true,
-      message: "Import job cancelled",
-      data: formatJobResponse(job)
-    });
+    sendSuccess(res, 200, { message: "Import job cancelled", data: formatJobResponse(job) });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    sendError(res, 500, error.message);
   }
 };

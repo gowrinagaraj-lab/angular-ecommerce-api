@@ -1,4 +1,5 @@
 const jwt = require("jsonwebtoken");
+const { sendError } = require("../utils/response");
 
 const protect = (req, res, next) => {
 
@@ -6,10 +7,7 @@ const protect = (req, res, next) => {
 
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
 
-        return res.status(401).json({
-            success: false,
-            message: "Not authorized, no token"
-        });
+        return sendError(res, 401, "Not authorized, no token");
 
     }
 
@@ -18,17 +16,14 @@ const protect = (req, res, next) => {
     try {
 
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        // console.log("decoded ", decoded)
+
         req.user = { id: decoded.id, role: decoded.role };
 
         next();
 
     } catch (error) {
 
-        return res.status(401).json({
-            success: false,
-            message: "Not authorized, invalid token"
-        });
+        return sendError(res, 401, "Not authorized, invalid token");
 
     }
 

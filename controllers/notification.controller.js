@@ -3,6 +3,7 @@ const { validationResult } = require("express-validator");
 
 const Notification = require("../src/models/Notification");
 const User = require("../src/models/User");
+const { sendSuccess, sendError } = require("../src/utils/response");
 
 const parseBoolean = (value) => {
   if (typeof value === "boolean") {
@@ -21,30 +22,21 @@ exports.createNotification = async (req, res) => {
     const errors = validationResult(req);
 
     if (!errors.isEmpty()) {
-      return res.status(400).json({
-        success: false,
-        message: errors.array()[0].msg
-      });
+      return sendError(res, 400, errors.array()[0].msg);
     }
 
     const { title, message, type = "system", userId, link = "", metadata } = req.body;
     const sendToAll = parseBoolean(req.body.sendToAll);
 
     if (!sendToAll && !userId) {
-      return res.status(400).json({
-        success: false,
-        message: "userId is required when sendToAll is false"
-      });
+      return sendError(res, 400, "userId is required when sendToAll is false");
     }
 
     if (sendToAll) {
       const users = await User.find({}, "_id");
 
       if (!users.length) {
-        return res.status(404).json({
-          success: false,
-          message: "No users found to notify"
-        });
+        return sendError(res, 404, "No users found to notify");
       }
 
       const notifications = users.map((user) => ({
@@ -59,8 +51,7 @@ exports.createNotification = async (req, res) => {
 
       const createdNotifications = await Notification.insertMany(notifications);
 
-      return res.status(201).json({
-        success: true,
+      return sendSuccess(res, 201, {
         message: "Notifications created successfully",
         count: createdNotifications.length,
         data: createdNotifications
@@ -68,19 +59,13 @@ exports.createNotification = async (req, res) => {
     }
 
     if (!mongoose.Types.ObjectId.isValid(userId)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid user ID format"
-      });
+      return sendError(res, 400, "Invalid user ID format");
     }
 
     const user = await User.findById(userId);
 
     if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found"
-      });
+      return sendError(res, 404, "User not found");
     }
 
     const notification = await Notification.create({
@@ -93,20 +78,13 @@ exports.createNotification = async (req, res) => {
       createdBy: req.user.id
     });
 
-    res.status(201).json({
-      success: true,
-      message: "Notification created successfully",
-      data: notification
-    });
+    sendSuccess(res, 201, { message: "Notification created successfully", data: notification });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    sendError(res, 500, error.message);
   }
 };
 
-exports.getMyNotifications = async (req, res) => {
+exports.getMyNotifications   = async (req, res) => {
   try {
     const page = Math.max(1, Number(req.query.page) || 1);
     const limit = Math.max(1, Number(req.query.limit) || 10);
@@ -128,18 +106,14 @@ exports.getMyNotifications = async (req, res) => {
       .skip(skip)
       .limit(limit);
 
-    res.status(200).json({
-      success: true,
+    sendSuccess(res, 200, {
       total,
       page,
       totalPages: Math.ceil(total / limit),
       data: notifications
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    sendError(res, 500, error.message);
   }
 };
 
@@ -150,27 +124,16 @@ exports.getUnreadNotificationCount = async (req, res) => {
       isRead: false
     });
 
-    res.status(200).json({
-      success: true,
-      data: {
-        unreadCount
-      }
-    });
+    sendSuccess(res, 200, { data: { unreadCount } });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    sendError(res, 500, error.message);
   }
 };
 
 exports.markNotificationAsRead = async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid notification ID format"
-      });
+      return sendError(res, 400, "Invalid notification ID format");
     }
 
     const notification = await Notification.findOne({
@@ -179,10 +142,7 @@ exports.markNotificationAsRead = async (req, res) => {
     });
 
     if (!notification) {
-      return res.status(404).json({
-        success: false,
-        message: "Notification not found"
-      });
+      return sendError(res, 404, "Notification not found");
     }
 
     if (!notification.isRead) {
@@ -191,16 +151,9 @@ exports.markNotificationAsRead = async (req, res) => {
       await notification.save();
     }
 
-    res.status(200).json({
-      success: true,
-      message: "Notification marked as read",
-      data: notification
-    });
+    sendSuccess(res, 200, { message: "Notification marked as read", data: notification });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    sendError(res, 500, error.message);
   }
 };
 
@@ -219,17 +172,13 @@ exports.markAllNotificationsAsRead = async (req, res) => {
       }
     );
 
-    res.status(200).json({
-      success: true,
+    sendSuccess(res, 200, {
       message: "All notifications marked as read",
       data: {
         modifiedCount: result.modifiedCount
       }
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    sendError(res, 500, error.message);
   }
 };

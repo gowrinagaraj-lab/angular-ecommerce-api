@@ -2,6 +2,7 @@ const { validationResult } = require("express-validator");
 
 const Cart = require("../src/models/Cart");
 const Product = require("../src/models/Product");
+const { sendSuccess, sendError } = require("../src/utils/response");
 
 /*
 Add Product To Cart
@@ -15,27 +16,21 @@ exports.addToCart = async (req, res) => {
 
         const errors = validationResult(req);
 
-        if (!errors.isEmpty()) { 
+        if (!errors.isEmpty()) {
 
-            return res.status(400).json({
-                success: false,
-                message: errors.array()[0].msg
-            });
+            return sendError(res, 400, errors.array()[0].msg);
 
         }
 
         const userId = req.user.id;
-console.log(req.user, ' userId')
+
         const { productId, quantity } = req.body;
 
         const product = await Product.findById(productId);
 
         if (!product) {
 
-            return res.status(404).json({
-                success: false,
-                message: "Product not found"
-            });
+            return sendError(res, 404, "Product not found");
 
         }
 
@@ -59,10 +54,7 @@ console.log(req.user, ' userId')
 
         if (product.stock < requestedQuantity) {
 
-            return res.status(400).json({
-                success: false,
-                message: `Only ${product.stock} unit(s) of ${product.name} available`
-            });
+            return sendError(res, 400, `Only ${product.stock} unit(s) of ${product.name} available`);
 
         }
 
@@ -81,29 +73,16 @@ console.log(req.user, ' userId')
 
         await cart.save();
 
-        res.status(200).json({
-            success: true,
-            message: "Product added to cart",
-            data: cart
-        });
+        sendSuccess(res, 200, { message: "Product added to cart", data: cart });
 
     } catch (error) {
 
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
+        sendError(res, 500, error.message);
 
     }
 
 };
 
-
-/*
-Get User Cart
-
-GET /api/cart
-*/
 
 /*
 Get User Cart
@@ -116,10 +95,7 @@ exports.getCart = async (req, res) => {
         }).populate("items.product");
 
         if (!cart) {
-            return res.status(404).json({
-                success: false,
-                message: "Cart is empty"
-            });
+            return sendError(res, 404, "Cart is empty");
         }
 
         // 1. Filter out items whose referenced product was deleted from DB
@@ -136,18 +112,10 @@ exports.getCart = async (req, res) => {
         // Save cleaned cart back to database if any deleted items were filtered out
         await cart.save();
 
-        res.json({
-            success: true,
-            totalItems: cart.items.length,
-            grandTotal: total,
-            data: cart
-        });
+        sendSuccess(res, 200, { totalItems: cart.items.length, grandTotal: total, data: cart });
 
     } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
+        sendError(res, 500, error.message);
     }
 };
 
@@ -166,10 +134,7 @@ exports.updateQuantity = async (req, res) => {
 
         if (!errors.isEmpty()) {
 
-            return res.status(400).json({
-                success: false,
-                message: errors.array()[0].msg
-            });
+            return sendError(res, 400, errors.array()[0].msg);
 
         }
 
@@ -183,10 +148,7 @@ exports.updateQuantity = async (req, res) => {
 
         if (!cart) {
 
-            return res.status(404).json({
-                success: false,
-                message: "Cart not found"
-            });
+            return sendError(res, 404, "Cart not found");
 
         }
 
@@ -196,10 +158,7 @@ exports.updateQuantity = async (req, res) => {
 
         if (!item) {
 
-            return res.status(404).json({
-                success: false,
-                message: "Product not found in cart"
-            });
+            return sendError(res, 404, "Product not found in cart");
 
         }
 
@@ -207,19 +166,13 @@ exports.updateQuantity = async (req, res) => {
 
         if (!product) {
 
-            return res.status(404).json({
-                success: false,
-                message: "Product not found"
-            });
+            return sendError(res, 404, "Product not found");
 
         }
 
         if (product.stock < quantity) {
 
-            return res.status(400).json({
-                success: false,
-                message: `Only ${product.stock} unit(s) of ${product.name} available`
-            });
+            return sendError(res, 400, `Only ${product.stock} unit(s) of ${product.name} available`);
 
         }
 
@@ -227,18 +180,11 @@ exports.updateQuantity = async (req, res) => {
 
         await cart.save();
 
-        res.json({
-            success: true,
-            message: "Quantity updated",
-            data: cart
-        });
+        sendSuccess(res, 200, { message: "Quantity updated", data: cart });
 
     } catch (error) {
 
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
+        sendError(res, 500, error.message);
 
     }
 
@@ -259,10 +205,7 @@ exports.removeItem = async (req, res) => {
 
         if (!errors.isEmpty()) {
 
-            return res.status(400).json({
-                success: false,
-                message: errors.array()[0].msg
-            });
+            return sendError(res, 400, errors.array()[0].msg);
 
         }
 
@@ -272,10 +215,7 @@ exports.removeItem = async (req, res) => {
 
         if (!cart) {
 
-            return res.status(404).json({
-                success: false,
-                message: "Cart not found"
-            });
+            return sendError(res, 404, "Cart not found");
 
         }
 
@@ -285,17 +225,11 @@ exports.removeItem = async (req, res) => {
 
         await cart.save();
 
-        res.json({
-            success: true,
-            message: "Item removed"
-        });
+        sendSuccess(res, 200, { message: "Item removed" });
 
     } catch (error) {
 
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
+        sendError(res, 500, error.message);
 
     }
 
@@ -318,10 +252,7 @@ exports.clearCart = async (req, res) => {
 
         if (!cart) {
 
-            return res.status(404).json({
-                success: false,
-                message: "Cart not found"
-            });
+            return sendError(res, 404, "Cart not found");
 
         }
 
@@ -329,17 +260,11 @@ exports.clearCart = async (req, res) => {
 
         await cart.save();
 
-        res.json({
-            success: true,
-            message: "Cart cleared"
-        });
+        sendSuccess(res, 200, { message: "Cart cleared" });
 
     } catch (error) {
 
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
+        sendError(res, 500, error.message);
 
     }
 

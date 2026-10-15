@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const multer = require("multer");
+const { sendError } = require("../utils/response");
 
 const UPLOAD_ROOT = path.join(__dirname, "..", "..", "uploads", "imports");
 
@@ -69,15 +70,15 @@ const categoryImportUpload = (req, res, next) => {
           ? `File is too large. Maximum allowed size is ${MAX_FILE_SIZE_BYTES / (1024 * 1024)}MB.`
           : error.message;
 
-      return res.status(400).json({ success: false, message });
+      return sendError(res, 400, message);
     }
 
     if (error) {
-      return res.status(400).json({ success: false, message: error.message });
+      return sendError(res, 400, error.message);
     }
 
     if (!req.file) {
-      return res.status(400).json({ success: false, message: "No file uploaded. Please select a CSV or Excel file." });
+      return sendError(res, 400, "No file uploaded. Please select a CSV or Excel file.");
     }
 
     next();

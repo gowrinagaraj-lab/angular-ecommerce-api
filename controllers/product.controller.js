@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const Product = require("../src/models/Product");
 const Category = require("../src/models/Category");
 const { listProducts } = require("../services/product.service");
+const { sendSuccess, sendError } = require("../src/utils/response");
 
 /*
 Create Product
@@ -9,66 +10,44 @@ POST /api/products
 */
 exports.createProduct = async (req, res) => {
   try {
-  
-console.log("Request Body:", req.body); // Log the request body for debugging
 
     const { name, category } = req.body;
-console.log("Product Name:", name); // Log the product name for debugging
+
     // 1. Check for Duplicate Product Name (case-insensitive)
     if (name) {
       const existingProduct = await Product.findOne({
         name: { $regex: new RegExp(`^${name.trim()}$`, "i") }
       });
- // Log the existing product for debugging
-    //  return false
-if (existingProduct) {
-        return res.status(400).json({
-          success: false,
-          message: `Product with name "${name}" already exists.`
-        });
+
+      if (existingProduct) {
+        return sendError(res, 400, `Product with name "${name}" already exists.`);
       }
     }
 
     // 2. Validate Category Reference
     if (category) {
       if (!mongoose.Types.ObjectId.isValid(category)) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid category ID format"
-        });
+        return sendError(res, 400, "Invalid category ID format");
       }
 
       const categoryExists = await Category.findById(category);
       if (!categoryExists) {
-        return res.status(400).json({
-          success: false,
-          message: "Category not found"
-        });
+        return sendError(res, 400, "Category not found");
       }
     }
 
     const product = await Product.create(req.body);
 
-    res.status(201).json({
-      success: true,
-      message: "Product created successfully",
-      data: product
-    });
+    sendSuccess(res, 201, { message: "Product created successfully", data: product });
 
   } catch (error) {
     // Catch Mongoose unique index violation error (Code 11000)
     if (error.code === 11000) {
       const field = Object.keys(error.keyValue)[0];
-      return res.status(400).json({
-        success: false,
-        message: `Duplicate entry: A product with this ${field} already exists.`
-      });
+      return sendError(res, 400, `Duplicate entry: A product with this ${field} already exists.`);
     }
 
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    sendError(res, 500, error.message);
   }
 };
 
@@ -81,16 +60,10 @@ exports.getProducts = async (req, res) => {
   try {
     const result = await listProducts(req.query);
 
-    res.json({
-      success: true,
-      ...result
-    });
+    sendSuccess(res, 200, result);
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
-}
+    sendError(res, 500, error.message);
+  }
 };
 
 
@@ -100,34 +73,21 @@ GET /api/products/:id
 */
 exports.getProductById = async (req, res) => {
   try {
-    console.log("Product ID:", req.params.id); // Log the product ID for debugging
     const product = await Product.findById(req.params.id);
 
     if (!product) {
-      return res.status(404).json({
-        success: false,
-        message: "Product not found"
-      });
+      return sendError(res, 404, "Product not found");
     }
 
-    res.json({
-      success: true,
-      data: product
-    });
+    sendSuccess(res, 200, { data: product });
 
   } catch (error) {
     // Catch Invalid Mongo ObjectId errors
     if (error.kind === "ObjectId") {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid product ID format"
-      });
+      return sendError(res, 400, "Invalid product ID format");
     }
 
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    sendError(res, 500, error.message);
   }
 };
 
@@ -148,10 +108,7 @@ exports.updateProduct = async (req, res) => {
       });
 
       if (existingProduct) {
-        return res.status(400).json({
-          success: false,
-          message: `Another product with name "${name}" already exists.`
-        });
+        return sendError(res, 400, `Another product with name "${name}" already exists.`);
       }
     }
 
@@ -165,30 +122,17 @@ exports.updateProduct = async (req, res) => {
     );
 
     if (!product) {
-      return res.status(404).json({
-        success: false,
-        message: "Product not found"
-      });
+      return sendError(res, 404, "Product not found");
     }
 
-    res.json({
-      success: true,
-      message: "Product updated successfully",
-      data: product
-    });
+    sendSuccess(res, 200, { message: "Product updated successfully", data: product });
   } catch (error) {
     if (error.code === 11000) {
       const field = Object.keys(error.keyValue)[0];
-      return res.status(400).json({
-        success: false,
-        message: `Duplicate entry: A product with this ${field} already exists.`
-      });
+      return sendError(res, 400, `Duplicate entry: A product with this ${field} already exists.`);
     }
 
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    sendError(res, 500, error.message);
   }
 };
 
@@ -202,21 +146,12 @@ exports.deleteProduct = async (req, res) => {
     const product = await Product.findByIdAndDelete(req.params.id);
 
     if (!product) {
-      return res.status(404).json({
-        success: false,
-        message: "Product not found"
-      });
+      return sendError(res, 404, "Product not found");
     }
 
-    res.json({
-      success: true,
-      message: "Product deleted successfully"
-    });
+    sendSuccess(res, 200, { message: "Product deleted successfully" });
 
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    sendError(res, 500, error.message);
   }
 };

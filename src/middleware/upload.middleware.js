@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const multer = require("multer");
+const { sendError } = require("../utils/response");
 
 const UPLOAD_ROOT = path.join(__dirname, "..", "..", "uploads", "reviews");
 
@@ -48,10 +49,7 @@ const reviewUpload = (req, res, next) => {
         { name: "file", maxCount: 1 }
     ])(req, res, (error) => {
         if (error) {
-            return res.status(400).json({
-                success: false,
-                message: error.message
-            });
+            return sendError(res, 400, error.message);
         }
 
         next();

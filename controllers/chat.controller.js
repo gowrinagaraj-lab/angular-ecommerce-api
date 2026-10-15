@@ -4,6 +4,7 @@ const { validationResult } = require("express-validator");
 const ollama = require("../src/config/ollama");
 const ChatConversation = require("../src/models/ChatConversation");
 const { chatTools, executeChatTool } = require("../utils/chatTools");
+const { sendSuccess, sendError } = require("../src/utils/response");
 
 const MAX_TOOL_ITERATIONS = 5;
 
@@ -63,10 +64,7 @@ exports.sendMessage = async (req, res) => {
     const errors = validationResult(req);
 
     if (!errors.isEmpty()) {
-      return res.status(400).json({
-        success: false,
-        message: errors.array()[0].msg
-      });
+      return sendError(res, 400, errors.array()[0].msg);
     }
 
     const userId = req.user.id;
@@ -76,19 +74,13 @@ exports.sendMessage = async (req, res) => {
 
     if (conversationId) {
       if (!mongoose.Types.ObjectId.isValid(conversationId)) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid conversation ID format"
-        });
+        return sendError(res, 400, "Invalid conversation ID format");
       }
 
       conversation = await ChatConversation.findOne({ _id: conversationId, user: userId });
 
       if (!conversation) {
-        return res.status(404).json({
-          success: false,
-          message: "Conversation not found"
-        });
+        return sendError(res, 404, "Conversation not found");
       }
     } else {
       conversation = new ChatConversation({ user: userId, messages: [] });
@@ -112,8 +104,7 @@ exports.sendMessage = async (req, res) => {
 
     await conversation.save();
 
-    res.status(200).json({
-      success: true,
+    sendSuccess(res, 200, {
       data: {
         conversationId: conversation._id,
         reply: replyText,
@@ -121,10 +112,7 @@ exports.sendMessage = async (req, res) => {
       }
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    sendError(res, 500, error.message);
   }
 };
 
@@ -156,18 +144,14 @@ exports.getMyConversations = async (req, res) => {
       updatedAt: conversation.updatedAt
     }));
 
-    res.status(200).json({
-      success: true,
+    sendSuccess(res, 200, {
       total,
       page,
       totalPages: Math.ceil(total / limit),
       data
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    sendError(res, 500, error.message);
   }
 };
 
@@ -179,10 +163,7 @@ GET /api/chat/:id
 exports.getConversationById = async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid conversation ID format"
-      });
+      return sendError(res, 400, "Invalid conversation ID format");
     }
 
     const conversation = await ChatConversation.findOne({
@@ -191,21 +172,12 @@ exports.getConversationById = async (req, res) => {
     });
 
     if (!conversation) {
-      return res.status(404).json({
-        success: false,
-        message: "Conversation not found"
-      });
+      return sendError(res, 404, "Conversation not found");
     }
 
-    res.status(200).json({
-      success: true,
-      data: conversation
-    });
+    sendSuccess(res, 200, { data: conversation });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    sendError(res, 500, error.message);
   }
 };
 
@@ -217,10 +189,7 @@ DELETE /api/chat/:id
 exports.deleteConversation = async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid conversation ID format"
-      });
+      return sendError(res, 400, "Invalid conversation ID format");
     }
 
     const conversation = await ChatConversation.findOneAndDelete({
@@ -229,20 +198,11 @@ exports.deleteConversation = async (req, res) => {
     });
 
     if (!conversation) {
-      return res.status(404).json({
-        success: false,
-        message: "Conversation not found"
-      });
+      return sendError(res, 404, "Conversation not found");
     }
 
-    res.status(200).json({
-      success: true,
-      message: "Conversation deleted successfully"
-    });
+    sendSuccess(res, 200, { message: "Conversation deleted successfully" });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    sendError(res, 500, error.message);
   }
 };

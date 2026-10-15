@@ -1,10 +1,12 @@
 const Category = require("../src/models/Category");
+const { sendSuccess, sendError } = require("../src/utils/response");
 
 /*
 Create Category
 POST /api/categories
 */
 exports.createCategory = async (req, res) => {
+
   try {
     const { name } = req.body;
 
@@ -14,34 +16,21 @@ exports.createCategory = async (req, res) => {
       });
 
       if (existingCategory) {
-        return res.status(400).json({
-          success: false,
-          message: `Category with name "${name}" already exists.`
-        });
+        return sendError(res, 400, `Category with name "${name}" already exists.`);
       }
     }
 
     const category = await Category.create(req.body);
 
-    res.status(201).json({
-      success: true,
-      message: "Category created successfully",
-      data: category
-    });
+    sendSuccess(res, 201, { message: "Category created successfully", data: category });
 
   } catch (error) {
     if (error.code === 11000) {
       const field = Object.keys(error.keyValue)[0];
-      return res.status(400).json({
-        success: false,
-        message: `Duplicate entry: A category with this ${field} already exists.`
-      });
+      return sendError(res, 400, `Duplicate entry: A category with this ${field} already exists.`);
     }
 
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    sendError(res, 500, error.message);
   }
 };
 
@@ -54,17 +43,10 @@ exports.getCategories = async (req, res) => {
   try {
     const categories = await Category.find().sort("name");
 
-    res.json({
-      success: true,
-      total: categories.length,
-      data: categories
-    });
+    sendSuccess(res, 200, { total: categories.length, data: categories });
 
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    sendError(res, 500, error.message);
   }
 };
 
@@ -78,29 +60,17 @@ exports.getCategoryById = async (req, res) => {
     const category = await Category.findById(req.params.id);
 
     if (!category) {
-      return res.status(404).json({
-        success: false,
-        message: "Category not found"
-      });
+      return sendError(res, 404, "Category not found");
     }
 
-    res.json({
-      success: true,
-      data: category
-    });
+    sendSuccess(res, 200, { data: category });
 
   } catch (error) {
     if (error.kind === "ObjectId") {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid category ID format"
-      });
+      return sendError(res, 400, "Invalid category ID format");
     }
 
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    sendError(res, 500, error.message);
   }
 };
 
@@ -120,10 +90,7 @@ exports.updateCategory = async (req, res) => {
       });
 
       if (existingCategory) {
-        return res.status(400).json({
-          success: false,
-          message: `Another category with name "${name}" already exists.`
-        });
+        return sendError(res, 400, `Another category with name "${name}" already exists.`);
       }
     }
 
@@ -137,31 +104,18 @@ exports.updateCategory = async (req, res) => {
     );
 
     if (!category) {
-      return res.status(404).json({
-        success: false,
-        message: "Category not found"
-      });
+      return sendError(res, 404, "Category not found");
     }
 
-    res.json({
-      success: true,
-      message: "Category updated successfully",
-      data: category
-    });
+    sendSuccess(res, 200, { message: "Category updated successfully", data: category });
 
   } catch (error) {
     if (error.code === 11000) {
       const field = Object.keys(error.keyValue)[0];
-      return res.status(400).json({
-        success: false,
-        message: `Duplicate entry: A category with this ${field} already exists.`
-      });
+      return sendError(res, 400, `Duplicate entry: A category with this ${field} already exists.`);
     }
 
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    sendError(res, 500, error.message);
   }
 };
 
@@ -175,10 +129,7 @@ exports.toggleCategoryStatus = async (req, res) => {
     const { isActive } = req.body;
 
     if (typeof isActive !== "boolean") {
-      return res.status(400).json({
-        success: false,
-        message: "isActive must be a boolean value (true or false)"
-      });
+      return sendError(res, 400, "isActive must be a boolean value (true or false)");
     }
 
     const category = await Category.findByIdAndUpdate(
@@ -191,30 +142,17 @@ exports.toggleCategoryStatus = async (req, res) => {
     );
 
     if (!category) {
-      return res.status(404).json({
-        success: false,
-        message: "Category not found"
-      });
+      return sendError(res, 404, "Category not found");
     }
 
-    res.json({
-      success: true,
-      message: `Category ${isActive ? "activated" : "deactivated"} successfully`,
-      data: category
-    });
+    sendSuccess(res, 200, { message: `Category ${isActive ? "activated" : "deactivated"} successfully`, data: category });
 
   } catch (error) {
     if (error.kind === "ObjectId") {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid category ID format"
-      });
+      return sendError(res, 400, "Invalid category ID format");
     }
 
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    sendError(res, 500, error.message);
   }
 };
 
@@ -228,21 +166,12 @@ exports.deleteCategory = async (req, res) => {
     const category = await Category.findByIdAndDelete(req.params.id);
 
     if (!category) {
-      return res.status(404).json({
-        success: false,
-        message: "Category not found"
-      });
+      return sendError(res, 404, "Category not found");
     }
 
-    res.json({
-      success: true,
-      message: "Category deleted successfully"
-    });
+    sendSuccess(res, 200, { message: "Category deleted successfully" });
 
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    sendError(res, 500, error.message);
   }
 };

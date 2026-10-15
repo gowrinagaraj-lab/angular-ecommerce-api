@@ -6,6 +6,7 @@ const User = require("../src/models/User");
 const SignInActivity = require("../src/models/SignInActivity");
 const generateToken = require("../utils/generateToken");
 const sendEmail = require("../utils/sendEmail");
+const { sendSuccess, sendError } = require("../src/utils/response");
 
 const logSignInActivity = ({ email, user, req, status, failureReason }) => {
 
@@ -36,10 +37,7 @@ exports.register = async (req, res) => {
 
         if (!errors.isEmpty()) {
 
-            return res.status(400).json({
-                success: false,
-                message: errors.array()[0].msg
-            });
+            return sendError(res, 400, errors.array()[0].msg);
 
         }
 
@@ -49,10 +47,7 @@ exports.register = async (req, res) => {
 
         if (existingUser) {
 
-            return res.status(409).json({
-                success: false,
-                message: "Email is already registered"
-            });
+            return sendError(res, 409, "Email is already registered");
 
         }
 
@@ -72,8 +67,7 @@ exports.register = async (req, res) => {
 
         const token = generateToken(user._id, user.role);
 
-        res.json({
-            success: true,
+        sendSuccess(res, 200, {
             message: "User registered successfully",
             data: {
                 user: {
@@ -89,10 +83,7 @@ exports.register = async (req, res) => {
 
     } catch (error) {
 
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
+        sendError(res, 500, error.message);
 
     }
 
@@ -113,17 +104,14 @@ exports.login = async (req, res) => {
 
         if (!errors.isEmpty()) {
 
-            return res.status(400).json({
-                success: false,
-                message: errors.array()[0].msg
-            });
+            return sendError(res, 400, errors.array()[0].msg);
 
         }
 
         const { email, password } = req.body;
 
         const user = await User.findOne({ email: email.toLowerCase() }).select("+password");
-console.log(user, ' user')
+
         if (!user) {
 
             logSignInActivity({
@@ -133,15 +121,12 @@ console.log(user, ' user')
                 failureReason: "No account found with this email"
             });
 
-            return res.status(401).json({
-                success: false,
-                message: "Invalid email or password"
-            });
+            return sendError(res, 401, "Invalid email or password");
 
         }
 
         const isMatch = await bcrypt.compare(password, user.password);
-// console.log(password, user.password,"sdfsdfs")
+
         if (!isMatch) {
 
             logSignInActivity({
@@ -152,10 +137,7 @@ console.log(user, ' user')
                 failureReason: "Incorrect password"
             });
 
-            return res.status(401).json({
-                success: false,
-                message: "Invalid email or password"
-            });
+            return sendError(res, 401, "Invalid email or password");
 
         }
 
@@ -168,8 +150,7 @@ console.log(user, ' user')
             status: "Success"
         });
 
-        res.status(200).json({
-            success: true,
+        sendSuccess(res, 200, {
             message: "Login successful",
             data: {
                 user: {
@@ -177,19 +158,16 @@ console.log(user, ' user')
                     name: user.name,
                     email: user.email,
                     phone: user.phone,
-                    role: user.role, 
-                 
+                    role: user.role
+
                 },
                 token
             }
-        }); 
+        });
 
     } catch (error) {
 
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
+        sendError(res, 500, error.message);
 
     }
 
@@ -210,10 +188,7 @@ exports.forgotPassword = async (req, res) => {
 
         if (!errors.isEmpty()) {
 
-            return res.status(400).json({
-                success: false,
-                message: errors.array()[0].msg
-            });
+            return sendError(res, 400, errors.array()[0].msg);
 
         }
 
@@ -248,26 +223,17 @@ exports.forgotPassword = async (req, res) => {
 
                 await user.save({ validateBeforeSave: false });
 
-                return res.status(500).json({
-                    success: false,
-                    message: "Failed to send reset email, please try again later"
-                });
+                return sendError(res, 500, "Failed to send reset email, please try again later");
 
             }
 
         }
 
-        res.json({
-            success: true,
-            message: "If that email is registered, a password reset link has been sent"
-        });
+        sendSuccess(res, 200, { message: "If that email is registered, a password reset link has been sent" });
 
     } catch (error) {
 
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
+        sendError(res, 500, error.message);
 
     }
 
@@ -288,10 +254,7 @@ exports.resetPassword = async (req, res) => {
 
         if (!errors.isEmpty()) {
 
-            return res.status(400).json({
-                success: false,
-                message: errors.array()[0].msg
-            });
+            return sendError(res, 400, errors.array()[0].msg);
 
         }
 
@@ -304,10 +267,7 @@ exports.resetPassword = async (req, res) => {
 
         if (!user) {
 
-            return res.status(400).json({
-                success: false,
-                message: "Reset token is invalid or has expired"
-            });
+            return sendError(res, 400, "Reset token is invalid or has expired");
 
         }
 
@@ -319,18 +279,11 @@ exports.resetPassword = async (req, res) => {
 
         const token = generateToken(user._id, user.role);
 
-        res.json({
-            success: true,
-            message: "Password reset successful",
-            data: { token }
-        });
+        sendSuccess(res, 200, { message: "Password reset successful", data: { token } });
 
     } catch (error) {
 
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
+        sendError(res, 500, error.message);
 
     }
 
@@ -362,8 +315,7 @@ exports.getMySignInActivity = async (req, res) => {
             .skip(skip)
             .limit(limit);
 
-        res.status(200).json({
-            success: true,
+        sendSuccess(res, 200, {
             total,
             page,
             totalPages: Math.ceil(total / limit),
@@ -372,10 +324,7 @@ exports.getMySignInActivity = async (req, res) => {
 
     } catch (error) {
 
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
+        sendError(res, 500, error.message);
 
     }
 
@@ -420,8 +369,7 @@ exports.getAllSignInActivity = async (req, res) => {
             .skip(skip)
             .limit(limit);
 
-        res.status(200).json({
-            success: true,
+        sendSuccess(res, 200, {
             total,
             page,
             totalPages: Math.ceil(total / limit),
@@ -430,10 +378,7 @@ exports.getAllSignInActivity = async (req, res) => {
 
     } catch (error) {
 
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
+        sendError(res, 500, error.message);
 
     }
 

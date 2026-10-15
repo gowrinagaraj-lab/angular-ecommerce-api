@@ -38,7 +38,7 @@ const listProducts = async (query = {}) => {
                     totalPages: 0,
                     data: [],
                     length: 0
-                };
+                }; 
             }
 
             filter.category = matchedCategory._id;

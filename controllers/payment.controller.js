@@ -4,6 +4,7 @@ const { validationResult } = require("express-validator");
 const Order = require("../src/models/Order");
 const Product = require("../src/models/Product");
 const Cart = require("../src/models/Cart");
+const { sendSuccess, sendError } = require("../src/utils/response");
 
 /*
 Verify Razorpay payment and finalize the order
@@ -19,10 +20,7 @@ exports.verifyPayment = async (req, res) => {
 
         if (!errors.isEmpty()) {
 
-            return res.status(400).json({
-                success: false,
-                message: errors.array()[0].msg
-            });
+            return sendError(res, 400, errors.array()[0].msg);
 
         }
 
@@ -37,20 +35,13 @@ exports.verifyPayment = async (req, res) => {
 
         if (!order) {
 
-            return res.status(404).json({
-                success: false,
-                message: "Order not found for this payment"
-            });
+            return sendError(res, 404, "Order not found for this payment");
 
         }
 
         if (order.paymentStatus === "Paid") {
 
-            return res.status(200).json({
-                success: true,
-                message: "Payment already verified",
-                data: order
-            });
+            return sendSuccess(res, 200, { message: "Payment already verified", data: order });
 
         }
 
@@ -72,10 +63,7 @@ exports.verifyPayment = async (req, res) => {
 
             await order.save();
 
-            return res.status(400).json({
-                success: false,
-                message: "Payment verification failed"
-            });
+            return sendError(res, 400, "Payment verification failed");
 
         }
 
@@ -85,10 +73,7 @@ exports.verifyPayment = async (req, res) => {
 
             if (product.stock < item.quantity) {
 
-                return res.status(400).json({
-                    success: false,
-                    message: `${item.name} is out of stock`
-                });
+                return sendError(res, 400, `${item.name} is out of stock`);
 
             }
 
@@ -124,9 +109,7 @@ exports.verifyPayment = async (req, res) => {
 
         }
 
-        res.status(200).json({
-
-            success: true,
+        sendSuccess(res, 200, {
 
             message: "Payment verified, order confirmed",
 
@@ -136,13 +119,7 @@ exports.verifyPayment = async (req, res) => {
 
     } catch (error) {
 
-        res.status(500).json({
-
-            success: false,
-
-            message: error.message
-
-        });
+        sendError(res, 500, error.message);
 
     }
 
