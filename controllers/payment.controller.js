@@ -1,10 +1,17 @@
 const crypto = require("crypto");
+const mongoose = require("mongoose");
 const { validationResult } = require("express-validator");
 
 const Order = require("../src/models/Order");
 const Product = require("../src/models/Product");
 const Cart = require("../src/models/Cart");
 const { sendSuccess, sendError } = require("../src/utils/response");
+
+const createRequestError = (statusCode, message) => {
+    const error = new Error(message);
+    error.statusCode = statusCode;
+    return error;
+};
 
 /*
 Verify Razorpay payment and finalize the order
@@ -13,36 +20,34 @@ POST /api/payments/verify
 */
 
 exports.verifyPayment = async (req, res) => {
+    let session;
 
     try {
-
         const errors = validationResult(req);
 
         if (!errors.isEmpty()) {
-
             return sendError(res, 400, errors.array()[0].msg);
-
         }
 
         const userId = req.user.id;
-
+        const idempotencyKey = req.get?.("Idempotency-Key") || req.headers?.["idempotency-key"];
         const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+
+        if (!idempotencyKey) {
+            return sendError(res, 400, "Idempotency-Key header is required");
+        }
 
         const order = await Order.findOne({
             user: userId,
             razorpayOrderId: razorpay_order_id
-        }).populate("items.product");
+        });
 
         if (!order) {
-
             return sendError(res, 404, "Order not found for this payment");
-
         }
 
         if (order.paymentStatus === "Paid") {
-
             return sendSuccess(res, 200, { message: "Payment already verified", data: order });
-
         }
 
         const expectedSignature = crypto
@@ -58,69 +63,80 @@ exports.verifyPayment = async (req, res) => {
             );
 
         if (!isValid) {
-
             order.paymentStatus = "Failed";
-
             await order.save();
-
             return sendError(res, 400, "Payment verification failed");
-
         }
 
-        for (const item of order.items) {
+        let finalizedOrder;
+        let alreadyVerified = false;
 
-            const product = item.product;
+        session = await mongoose.startSession();
 
-            if (product.stock < item.quantity) {
+        await session.withTransaction(async () => {
+            const currentOrder = await Order.findOne({
+                user: userId,
+                razorpayOrderId: razorpay_order_id
+            }).session(session);
 
-                return sendError(res, 400, `${item.name} is out of stock`);
-
+            if (!currentOrder) {
+                throw createRequestError(404, "Order not found for this payment");
             }
 
-        }
+            if (currentOrder.paymentStatus === "Paid") {
+                finalizedOrder = currentOrder;
+                alreadyVerified = true;
+                return;
+            }
 
-        for (const item of order.items) {
+            const keyAlreadyUsed = await Order.findOne({
+                user: userId,
+                paymentVerificationKey: idempotencyKey
+            }).session(session);
 
-            await Product.findByIdAndUpdate(
-                item.product._id,
-                {
-                    $inc: {
-                        stock: -item.quantity
-                    }
+            if (keyAlreadyUsed && keyAlreadyUsed._id.toString() !== currentOrder._id.toString()) {
+                throw createRequestError(409, "Idempotency key was already used for another payment");
+            }
+
+            for (const item of currentOrder.items) {
+                const stockUpdate = await Product.updateOne(
+                    { _id: item.product, stock: { $gte: item.quantity } },
+                    { $inc: { stock: -item.quantity } },
+                    { session }
+                );
+
+                if (stockUpdate.modifiedCount !== 1) {
+                    throw createRequestError(400, `${item.name} is out of stock`);
                 }
-            );
+            }
 
-        }
+            currentOrder.paymentStatus = "Paid";
+            currentOrder.orderStatus = "Processing";
+            currentOrder.razorpayPaymentId = razorpay_payment_id;
+            currentOrder.razorpaySignature = razorpay_signature;
+            currentOrder.paymentVerificationKey = idempotencyKey;
+            await currentOrder.save({ session });
 
-        order.paymentStatus = "Paid";
-        order.orderStatus = "Processing";
-        order.razorpayPaymentId = razorpay_payment_id;
-        order.razorpaySignature = razorpay_signature;
+            const cart = await Cart.findOne({ user: userId }).session(session);
 
-        await order.save();
+            if (cart) {
+                cart.items = [];
+                await cart.save({ session });
+            }
 
-        const cart = await Cart.findOne({ user: userId });
-
-        if (cart) {
-
-            cart.items = [];
-
-            await cart.save();
-
-        }
-
-        sendSuccess(res, 200, {
-
-            message: "Payment verified, order confirmed",
-
-            data: order
-
+            finalizedOrder = currentOrder;
         });
 
+        return sendSuccess(res, 200, {
+            message: alreadyVerified ? "Payment already verified" : "Payment verified, order confirmed",
+            data: finalizedOrder
+        });
     } catch (error) {
-
-        sendError(res, 500, error.message);
-
+        const statusCode = error.statusCode || (error.code === 11000 ? 409 : 500);
+        return sendError(res, statusCode, error.message);
+    } finally {
+        if (session) {
+            await session.endSession();
+        }
     }
-
 };

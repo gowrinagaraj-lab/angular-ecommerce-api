@@ -1,4 +1,5 @@
 const crypto = require("crypto");
+const mongoose = require("mongoose");
 const { validationResult } = require("express-validator");
 const Cart = require("../src/models/Cart");
 const Order = require("../src/models/Order");
@@ -9,133 +10,39 @@ const sendEmail = require("../utils/sendEmail");
 const { createUserNotification } = require("../utils/notification");
 const { sendSuccess, sendError } = require("../src/utils/response");
 
-/*
-Checkout
+const createRequestError = (statusCode, message) => {
+    const error = new Error(message);
+    error.statusCode = statusCode;
+    return error;
+};
 
-POST /api/orders/checkout
-*/
+const createOrderItems = (cart) => {
+    let grandTotal = 0;
 
-exports.checkout = async (req, res) => {
+    const items = cart.items.map((item) => {
+        const product = item.product;
 
+        if (!product) {
+            throw createRequestError(400, "A product in your cart is no longer available");
+        }
+
+        const subtotal = product.price * item.quantity;
+        grandTotal += subtotal;
+
+        return {
+            product: product._id,
+            name: product.name,
+            price: product.price,
+            quantity: item.quantity,
+            subtotal
+        };
+    });
+
+    return { items, grandTotal };
+};
+
+const sendOrderCreatedMessages = async ({ order, userId, orderItems, grandTotal, paymentMethod }) => {
     try {
-
-        const errors = validationResult(req);
-
-        if (!errors.isEmpty()) {
-
-            return sendError(res, 400, errors.array()[0].msg);
-
-        }
-
-        const userId = req.user.id;
-
-        const { addressId, paymentMethod } = req.body;
-
-        let shippingAddress = req.body.shippingAddress;
-
-        if (addressId) {
-
-            const savedAddress = await Address.findOne({ _id: addressId, user: userId });
-
-            if (!savedAddress) {
-
-                return sendError(res, 404, "Address not found");
-
-            }
-
-            shippingAddress = {
-                fullName: savedAddress.fullName,
-                phone: savedAddress.phone,
-                address: savedAddress.address,
-                city: savedAddress.city,
-                state: savedAddress.state,
-                country: savedAddress.country,
-                pincode: savedAddress.pincode
-            };
-
-        } else if (!shippingAddress) {
-
-            const defaultAddress = await Address.findOne({ user: userId, isDefault: true });
-
-            if (!defaultAddress) {
-
-                return sendError(res, 400, "shippingAddress or addressId is required, and no default address was found");
-
-            }
-
-            shippingAddress = {
-                fullName: defaultAddress.fullName,
-                phone: defaultAddress.phone,
-                address: defaultAddress.address,
-                city: defaultAddress.city,
-                state: defaultAddress.state,
-                country: defaultAddress.country,
-                pincode: defaultAddress.pincode
-            };
-
-        }
-
-const cart = await Cart.findOne({
-    user: userId
-});
-
-const pp=  await cart.populate("items.product");
-console.log(cart, 'cart' );
-console.log(pp, 'populated cart' );
-        if (!cart || cart.items.length === 0) {
-
-            return sendError(res, 400, "Cart is empty");
-
-        }
-
-        let orderItems = [];
-
-        let grandTotal = 0;
-
-        for (const item of cart.items) {
-
-            const product = item.product;
-
-            if (product.stock < item.quantity) {
-
-                return sendError(res, 400, `${product.name} is out of stock`);
-
-            }
-
-            const subtotal = product.price * item.quantity;
-
-            grandTotal += subtotal;
-
-            orderItems.push({
-
-                product: product._id,
-
-                name: product.name,
-
-                price: product.price,
-
-                quantity: item.quantity,
-
-                subtotal
-
-            });
-
-        } 
-
-        const order = await Order.create({
-
-            user: userId,
-
-            items: orderItems,
-
-            shippingAddress,
-
-            paymentMethod,
-
-            totalAmount: grandTotal
-
-        });
-
         await createUserNotification({
             userId,
             title: "Order created",
@@ -151,98 +58,194 @@ console.log(pp, 'populated cart' );
             },
             createdBy: userId
         });
+    } catch (notificationError) {
+        console.error("Failed to create order notification:", notificationError.message);
+    }
 
-        try {
+    try {
+        const orderWithUser = await Order.findById(order._id).populate("user", "name email role");
 
-            const orderWithUser = await Order.findById(order._id).populate("user", "name email role");
+        if (!orderWithUser?.user || orderWithUser.user.role !== "customer") {
+            return;
+        }
 
-            if (orderWithUser.user && orderWithUser.user.role === "customer") {
+        const itemsHtml = orderItems
+            .map((item) => `<li>${item.name} x ${item.quantity} - &#8377;${item.subtotal}</li>`)
+            .join("");
 
-                const itemsHtml = orderItems
-                    .map(item => `<li>${item.name} x ${item.quantity} - ₹${item.subtotal}</li>`)
-                    .join("");
+        await sendEmail({
+            to: orderWithUser.user.email,
+            subject: `Order Confirmation - #${order._id}`,
+            html: `<p>Hi ${orderWithUser.user.name},</p><p>Thank you for your order! Here's a summary:</p><ul>${itemsHtml}</ul><p><b>Total: &#8377;${grandTotal}</b></p><p>Payment Method: ${paymentMethod}</p><p>We'll notify you as your order status changes.</p>`
+        });
+    } catch (emailError) {
+        console.error("Failed to send order confirmation email:", emailError.message);
+    }
+};
 
-                await sendEmail({
-                    to: orderWithUser.user.email,
-                    subject: `Order Confirmation - #${order._id}`,
-                    html: `<p>Hi ${orderWithUser.user.name},</p><p>Thank you for your order! Here's a summary:</p><ul>${itemsHtml}</ul><p><b>Total: ₹${grandTotal}</b></p><p>Payment Method: ${paymentMethod}</p><p>We'll notify you as your order status changes.</p>`
-                });
+const transactionalCheckout = async (req, res) => {
+    let session;
 
+    try {
+        const errors = validationResult(req);
+
+        if (!errors.isEmpty()) {
+            return sendError(res, 400, errors.array()[0].msg);
+        }
+
+        const userId = req.user.id;
+        const { addressId, paymentMethod = "COD" } = req.body;
+        let shippingAddress = req.body.shippingAddress;
+
+        if (addressId) {
+            const savedAddress = await Address.findOne({ _id: addressId, user: userId });
+
+            if (!savedAddress) {
+                return sendError(res, 404, "Address not found");
             }
 
-        } catch (emailError) {
+            shippingAddress = {
+                fullName: savedAddress.fullName,
+                phone: savedAddress.phone,
+                address: savedAddress.address,
+                city: savedAddress.city,
+                state: savedAddress.state,
+                country: savedAddress.country,
+                pincode: savedAddress.pincode
+            };
+        } else if (!shippingAddress) {
+            const defaultAddress = await Address.findOne({ user: userId, isDefault: true });
 
-            console.error("Failed to send order confirmation email:", emailError.message);
+            if (!defaultAddress) {
+                return sendError(res, 400, "shippingAddress or addressId is required, and no default address was found");
+            }
 
+            shippingAddress = {
+                fullName: defaultAddress.fullName,
+                phone: defaultAddress.phone,
+                address: defaultAddress.address,
+                city: defaultAddress.city,
+                state: defaultAddress.state,
+                country: defaultAddress.country,
+                pincode: defaultAddress.pincode
+            };
         }
 
         if (paymentMethod === "CARD" || paymentMethod === "UPI") {
+            const cart = await Cart.findOne({ user: userId }).populate("items.product");
 
-            const razorpayOrder = await razorpay.orders.create({
+            if (!cart || cart.items.length === 0) {
+                return sendError(res, 400, "Cart is empty");
+            }
 
-                amount: Math.round(grandTotal * 100),
+            const { items: orderItems, grandTotal } = createOrderItems(cart);
 
-                currency: "INR",
-
-                receipt: order._id.toString()
-
-            });
-
-            order.razorpayOrderId = razorpayOrder.id;
-
-            await order.save();
-
-            return sendSuccess(res, 201, {
-
-                message: "Order created, awaiting payment",
-
-                data: order,
-
-                razorpay: {
-                    orderId: razorpayOrder.id,
-                    amount: razorpayOrder.amount,
-                    currency: razorpayOrder.currency,
-                    keyId: process.env.RAZORPAY_KEY_ID
+            for (const item of cart.items) {
+                if (item.product.stock < item.quantity) {
+                    return sendError(res, 400, `${item.product.name} is out of stock`);
                 }
+            }
 
+            const order = await Order.create({
+                user: userId,
+                items: orderItems,
+                shippingAddress,
+                paymentMethod,
+                totalAmount: grandTotal
             });
 
-        }
+            try {
+                const razorpayOrder = await razorpay.orders.create({
+                    amount: Math.round(grandTotal * 100),
+                    currency: "INR",
+                    receipt: order._id.toString()
+                });
 
-        for (const item of cart.items) {
+                order.razorpayOrderId = razorpayOrder.id;
+                await order.save();
 
-            await Product.findByIdAndUpdate(
+                await sendOrderCreatedMessages({ order, userId, orderItems, grandTotal, paymentMethod });
 
-                item.product._id,
-
-                {
-                    $inc: {
-                        stock: -item.quantity
+                return sendSuccess(res, 201, {
+                    message: "Order created, awaiting payment",
+                    data: order,
+                    razorpay: {
+                        orderId: razorpayOrder.id,
+                        amount: razorpayOrder.amount,
+                        currency: razorpayOrder.currency,
+                        keyId: process.env.RAZORPAY_KEY_ID
                     }
-                }
-
-            );
-
+                });
+            } catch (paymentSetupError) {
+                order.paymentStatus = "Failed";
+                await order.save();
+                return sendError(res, 502, "Unable to start payment. Please try again.");
+            }
         }
 
-        cart.items = [];
-        await cart.save();
+        let order;
+        let orderItems;
+        let grandTotal;
 
-        sendSuccess(res, 201, {
+        session = await mongoose.startSession();
 
-            message: "Order placed successfully",
+        await session.withTransaction(async () => {
+            const cart = await Cart.findOne({ user: userId })
+                .populate("items.product")
+                .session(session);
 
-            data: order
+            if (!cart || cart.items.length === 0) {
+                throw createRequestError(400, "Cart is empty");
+            }
 
+            ({ items: orderItems, grandTotal } = createOrderItems(cart));
+
+            for (const item of cart.items) {
+                const stockUpdate = await Product.updateOne(
+                    { _id: item.product._id, stock: { $gte: item.quantity } },
+                    { $inc: { stock: -item.quantity } },
+                    { session }
+                );
+
+                if (stockUpdate.modifiedCount !== 1) {
+                    throw createRequestError(400, `${item.product.name} is out of stock`);
+                }
+            }
+
+            [order] = await Order.create([{
+                user: userId,
+                items: orderItems,
+                shippingAddress,
+                paymentMethod,
+                totalAmount: grandTotal
+            }], { session });
+
+            cart.items = [];
+            await cart.save({ session });
         });
 
+        await sendOrderCreatedMessages({ order, userId, orderItems, grandTotal, paymentMethod });
+
+        return sendSuccess(res, 201, {
+            message: "Order placed successfully",
+            data: order
+        });
     } catch (error) {
-
-        sendError(res, 500, error.message);
-
+        return sendError(res, error.statusCode || 500, error.message);
+    } finally {
+        if (session) {
+            await session.endSession();
+        }
     }
-
 };
+
+/*
+Checkout
+
+POST /api/orders/checkout
+*/
+
+exports.checkout = transactionalCheckout;
 
 /*
 Generate Delivery OTP

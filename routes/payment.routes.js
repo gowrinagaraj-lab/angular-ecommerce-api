@@ -1,5 +1,5 @@
 const express = require("express");
-const { body } = require("express-validator");
+const { body, header } = require("express-validator");
 
 const router = express.Router();
 
@@ -11,6 +11,13 @@ router.post(
     "/verify",
     protect,
     [
+        header("idempotency-key")
+            .trim()
+            .notEmpty()
+            .withMessage("Idempotency-Key header is required")
+            .isLength({ min: 8, max: 255 })
+            .withMessage("Idempotency-Key must be between 8 and 255 characters"),
+
         body("razorpay_order_id")
             .trim()
             .notEmpty()

@@ -72,6 +72,10 @@ const orderSchema = new mongoose.Schema(
             type: String
         },
 
+        paymentVerificationKey: {
+            type: String
+        },
+
         orderStatus: {
             type: String,
             enum: [
@@ -102,6 +106,19 @@ const orderSchema = new mongoose.Schema(
     {
         timestamps: true
     }
+);
+
+orderSchema.index(
+    { user: 1, paymentVerificationKey: 1 },
+    {
+        unique: true,
+        partialFilterExpression: { paymentVerificationKey: { $type: "string" } }
+    }
+);
+
+orderSchema.index(
+    { razorpayPaymentId: 1 },
+    { unique: true, sparse: true }
 );
 
 module.exports = mongoose.model("Order", orderSchema);
