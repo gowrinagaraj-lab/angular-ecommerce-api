@@ -1,6 +1,8 @@
 jest.mock("../../src/models/Category");
+jest.mock("../../src/models/Product");
 
 const Category = require("../../src/models/Category");
+const Product = require("../../src/models/Product");
 const categoryController = require("../../controllers/category.controller");
 const { mockResponse } = require("../helpers/mockRes");
 
@@ -265,4 +267,50 @@ describe("category.controller", () => {
 
     });
 
+describe("deleteAllCategories", () => {
+
+        it("refuses to run without the confirmation phrase", async () => {
+
+            const res = mockResponse();
+
+            await categoryController.deleteAllCategories({ body: {} }, res);
+
+            expect(res.status).toHaveBeenCalledWith(400);
+            expect(Category.deleteMany).not.toHaveBeenCalled();
+
+        });
+
+        it("deletes only categories that no product uses and reports the rest", async () => {
+
+            Product.distinct.mockResolvedValue(["cat-used"]);
+            Category.deleteMany.mockResolvedValue({ deletedCount: 3 });
+            Category.countDocuments.mockResolvedValue(1);
+
+            const res = mockResponse();
+
+            await categoryController.deleteAllCategories({ body: { confirm: "DELETE ALL" } }, res);
+
+            expect(Category.deleteMany).toHaveBeenCalledWith({ _id: { $nin: ["cat-used"] } });
+            expect(res.status).toHaveBeenCalledWith(200);
+            expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+                data: { deletedCount: 3, skippedCount: 1 }
+            }));
+
+        });
+
+        it("returns 500 on unexpected errors", async () => {
+
+            Product.distinct.mockRejectedValue(new Error("DB down"));
+
+            const res = mockResponse();
+
+            await categoryController.deleteAllCategories({ body: { confirm: "DELETE ALL" } }, res);
+
+            expect(res.status).toHaveBeenCalledWith(500);
+
+        });
+
+    });
+
 });
+

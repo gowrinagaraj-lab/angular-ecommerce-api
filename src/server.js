@@ -6,6 +6,7 @@ const { Server } = require("socket.io");
 const app = require("./app");
 const connectDB = require("./config/db");
 const startProductChangeStream = require("./watchers/productChangeStream");
+const { startPaymentReconciliation } = require("../services/paymentReconciliation.service");
 
 const DEFAULT_PORT = 5000;
 const requestedPort = Number(process.env.PORT) || DEFAULT_PORT;
@@ -46,6 +47,7 @@ app.set("io", io);
 // changes (API-driven or manual) and broadcast them over the socket.
 connectDB().then(() => {
     startProductChangeStream(io);
+    startPaymentReconciliation();
 }).catch((error) => {
     console.error("Product change stream could not start:", error.message);
 });

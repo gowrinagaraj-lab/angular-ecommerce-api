@@ -35,8 +35,8 @@ router.patch(
             .trim()
             .notEmpty()
             .withMessage("orderStatus is required")
-            .isIn(["Pending", "Processing", "Shipped"])
-            .withMessage("orderStatus must be one of Pending, Processing, Shipped")
+            .isIn(["Processing", "Shipped"])
+            .withMessage("orderStatus must be one of Processing, Shipped")
     ],
     updateOrderStatus
 );
@@ -72,6 +72,7 @@ router.post(
 router.post(
     "/checkout",
     protect,
+    authorize("customer"),
     [
         body("paymentMethod")
             .optional()

@@ -3,6 +3,7 @@ const router = express.Router();
 const { body, param } = require("express-validator");
 
 const protect = require("../src/middleware/auth.middleware");
+const authorize = require("../src/middleware/authorize.middleware");
 
 const {
     getWishlist,
@@ -11,7 +12,8 @@ const {
     clearWishlist
 } = require("../controllers/wishlist.controller");
 
-router.use(protect);
+// Only customers shop; admins manage the store
+router.use(protect, authorize("customer"));
 
 router.get("/", getWishlist);
 

@@ -12,7 +12,8 @@ const {
     getCategoryById,
     updateCategory,
     toggleCategoryStatus,
-    deleteCategory
+    deleteCategory,
+    deleteAllCategories
 } = require("../controllers/category.controller");
 
 const {
@@ -24,6 +25,8 @@ const {
 router.post("/", protect, authorize("admin"), createCategory);
 
 router.get("/", getCategories);
+
+router.delete("/", protect, authorize("admin"), deleteAllCategories);
 
 // Import routes are registered before "/:id" so a literal segment like "import" is never
 // swallowed by the ":id" param route below.

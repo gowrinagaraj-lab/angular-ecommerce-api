@@ -1,5 +1,4 @@
 const crypto = require("crypto");
-const mongoose = require("mongoose");
 const { validationResult } = require("express-validator");
 const Cart = require("../src/models/Cart");
 const Order = require("../src/models/Order");
@@ -9,6 +8,7 @@ const razorpay = require("../src/config/razorpay");
 const sendEmail = require("../utils/sendEmail");
 const { createUserNotification } = require("../utils/notification");
 const { sendSuccess, sendError } = require("../src/utils/response");
+const runInTransaction = require("../src/utils/runInTransaction");
 
 const createRequestError = (statusCode, message) => {
     const error = new Error(message);
@@ -39,6 +39,43 @@ const createOrderItems = (cart) => {
     });
 
     return { items, grandTotal };
+};
+
+/*
+Order lifecycle: Pending -> Processing -> Shipped -> Delivered.
+Online (CARD/UPI) orders reach Processing only once payment is confirmed
+(verify call, webhook or reconciliation); COD orders are moved to
+Processing by an admin. Delivered is set only by the delivery OTP.
+*/
+
+const getStatusTransitionError = (order, nextStatus) => {
+    const isOnlinePayment = order.paymentMethod === "CARD" || order.paymentMethod === "UPI";
+
+    if (nextStatus === "Processing") {
+        if (order.orderStatus !== "Pending") {
+            return `Only pending orders can be moved to Processing (order is ${order.orderStatus})`;
+        }
+
+        if (isOnlinePayment && order.paymentStatus !== "Paid") {
+            return "Online orders move to Processing automatically once payment is confirmed";
+        }
+
+        return null;
+    }
+
+    if (nextStatus === "Shipped") {
+        if (order.orderStatus !== "Processing") {
+            return `Only processing orders can be shipped (order is ${order.orderStatus})`;
+        }
+
+        if (isOnlinePayment && order.paymentStatus !== "Paid") {
+            return "Cannot ship an online order before payment is confirmed";
+        }
+
+        return null;
+    }
+
+    return `Order status cannot be changed to ${nextStatus}`;
 };
 
 const sendOrderCreatedMessages = async ({ order, userId, orderItems, grandTotal, paymentMethod }) => {
@@ -84,8 +121,6 @@ const sendOrderCreatedMessages = async ({ order, userId, orderItems, grandTotal,
 };
 
 const transactionalCheckout = async (req, res) => {
-    let session;
-
     try {
         const errors = validationResult(req);
 
@@ -187,9 +222,7 @@ const transactionalCheckout = async (req, res) => {
         let orderItems;
         let grandTotal;
 
-        session = await mongoose.startSession();
-
-        await session.withTransaction(async () => {
+        await runInTransaction(async (session) => {
             const cart = await Cart.findOne({ user: userId })
                 .populate("items.product")
                 .session(session);
@@ -232,10 +265,6 @@ const transactionalCheckout = async (req, res) => {
         });
     } catch (error) {
         return sendError(res, error.statusCode || 500, error.message);
-    } finally {
-        if (session) {
-            await session.endSession();
-        }
     }
 };
 
@@ -274,6 +303,12 @@ exports.generateDeliveryOtp = async (req, res) => {
         if (order.orderStatus === "Cancelled") {
 
             return sendError(res, 400, "Cannot generate a delivery OTP for a cancelled order");
+
+        }
+
+        if (order.orderStatus !== "Shipped") {
+
+            return sendError(res, 400, "Mark the order as Shipped before generating a delivery OTP");
 
         }
 
@@ -348,6 +383,12 @@ exports.verifyDeliveryOtp = async (req, res) => {
         if (order.orderStatus === "Delivered") {
 
             return sendError(res, 400, "Order is already delivered");
+
+        }
+
+        if (order.orderStatus !== "Shipped") {
+
+            return sendError(res, 400, "Only shipped orders can be marked as delivered");
 
         }
 
@@ -629,6 +670,14 @@ exports.updateOrderStatus = async (req, res) => {
         if (order.orderStatus === "Delivered" || order.orderStatus === "Cancelled") {
 
             return sendError(res, 400, `Order is already ${order.orderStatus.toLowerCase()} and its status can no longer be changed`);
+
+        }
+
+        const transitionError = getStatusTransitionError(order, req.body.orderStatus);
+
+        if (transitionError) {
+
+            return sendError(res, 400, transitionError);
 
         }
 

@@ -1,4 +1,5 @@
 const Category = require("../src/models/Category");
+const Product = require("../src/models/Product");
 const { sendSuccess, sendError } = require("../src/utils/response");
 
 /*
@@ -170,6 +171,37 @@ exports.deleteCategory = async (req, res) => {
     }
 
     sendSuccess(res, 200, { message: "Category deleted successfully" });
+
+  } catch (error) {
+    sendError(res, 500, error.message);
+  }
+};
+
+/*
+Delete All Categories
+DELETE /api/categories
+Body: { "confirm": "DELETE ALL" }
+
+Every product must belong to a category, so categories still used by a
+product are kept (reassign or delete those products first). Everything
+else is removed and the response reports how many were skipped.
+*/
+exports.deleteAllCategories = async (req, res) => {
+  try {
+    if (req.body?.confirm !== "DELETE ALL") {
+      return sendError(res, 400, 'Send { "confirm": "DELETE ALL" } to delete all categories');
+    }
+
+    const usedCategoryIds = await Product.distinct("category");
+
+    const { deletedCount } = await Category.deleteMany({ _id: { $nin: usedCategoryIds } });
+    const skippedCount = await Category.countDocuments({ _id: { $in: usedCategoryIds } });
+
+    const message = skippedCount > 0
+      ? `Deleted ${deletedCount} categories. ${skippedCount} were kept because products still use them.`
+      : `Deleted ${deletedCount} categories.`;
+
+    sendSuccess(res, 200, { message, data: { deletedCount, skippedCount } });
 
   } catch (error) {
     sendError(res, 500, error.message);

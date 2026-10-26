@@ -9,7 +9,14 @@ const { notFoundHandler, errorHandler } = require("./middleware/errorHandler");
 
 const app = express();
 
-app.use(express.json());
+app.use(express.json({
+    // Keep the exact bytes for webhook signature verification
+    verify: (req, res, buf) => {
+        if (req.originalUrl.startsWith("/api/payments/webhook")) {
+            req.rawBody = buf;
+        }
+    }
+}));
 app.use(cors());
 app.use(helmet());
 app.use(morgan("dev"));

@@ -9,6 +9,7 @@ jest.mock("../../utils/notification", () => ({
 jest.mock("../../src/config/razorpay", () => ({
     orders: { create: jest.fn() }
 }));
+jest.mock("../../src/utils/runInTransaction", () => jest.fn((work) => work(null)));
 jest.mock("express-validator", () => ({
     validationResult: jest.fn()
 }));
@@ -25,6 +26,9 @@ const sendEmail = require("../../utils/sendEmail");
 
 const orderController = require("../../controllers/order.controller");
 const { mockResponse } = require("../helpers/mockRes");
+
+// COD checkout runs inside runInTransaction, so the cart query is chained with .session()
+const sessionCart = (cart) => ({ populate: jest.fn(() => ({ session: jest.fn().mockResolvedValue(cart) })) });
 
 const validRequest = () => ({ isEmpty: () => true, array: () => [] });
 const invalidRequest = (msg) => ({ isEmpty: () => false, array: () => [{ msg }] });
@@ -88,7 +92,7 @@ describe("order.controller", () => {
         it("returns 400 when the cart is empty", async () => {
 
             Address.findOne.mockResolvedValue(address);
-            Cart.findOne.mockReturnValue({ populate: jest.fn().mockResolvedValue(null) });
+            Cart.findOne.mockReturnValue(sessionCart(null));
 
             const req = { user: { id: "user-1" }, body: { addressId: "addr-1", paymentMethod: "COD" } };
             const res = mockResponse();
@@ -106,7 +110,8 @@ describe("order.controller", () => {
             const cart = {
                 items: [{ product: { _id: "p1", name: "Widget", price: 10, stock: 1 }, quantity: 5 }]
             };
-            Cart.findOne.mockReturnValue({ populate: jest.fn().mockResolvedValue(cart) });
+            Cart.findOne.mockReturnValue(sessionCart(cart));
+            Product.updateOne.mockResolvedValue({ modifiedCount: cart.items[0].product.stock >= cart.items[0].quantity ? 1 : 0 });
 
             const req = { user: { id: "user-1" }, body: { addressId: "addr-1", paymentMethod: "COD" } };
             const res = mockResponse();
@@ -125,9 +130,10 @@ describe("order.controller", () => {
                 items: [{ product: { _id: "p1", name: "Widget", price: 10, stock: 5 }, quantity: 2 }],
                 save: jest.fn().mockResolvedValue(true)
             };
-            Cart.findOne.mockReturnValue({ populate: jest.fn().mockResolvedValue(cart) });
+            Cart.findOne.mockReturnValue(sessionCart(cart));
+            Product.updateOne.mockResolvedValue({ modifiedCount: cart.items[0].product.stock >= cart.items[0].quantity ? 1 : 0 });
             const order = { _id: "order-1", save: jest.fn().mockResolvedValue(true) };
-            Order.create.mockResolvedValue(order);
+            Order.create.mockResolvedValue([order]);
             Order.findById.mockReturnValue({
                 populate: jest.fn().mockResolvedValue({ user: { name: "Jane", email: "jane@example.com", role: "customer" } })
             });
@@ -137,8 +143,8 @@ describe("order.controller", () => {
 
             await orderController.checkout(req, res);
 
-            expect(Order.create).toHaveBeenCalledWith(expect.objectContaining({ paymentMethod: "COD", totalAmount: 20 }));
-            expect(Product.findByIdAndUpdate).toHaveBeenCalledWith("p1", { $inc: { stock: -2 } });
+            expect(Order.create).toHaveBeenCalledWith([expect.objectContaining({ paymentMethod: "COD", totalAmount: 20 })], { session: null });
+            expect(Product.updateOne).toHaveBeenCalledWith({ _id: "p1", stock: { $gte: 2 } }, { $inc: { stock: -2 } }, { session: null });
             expect(cart.items).toHaveLength(0);
             expect(cart.save).toHaveBeenCalled();
             expect(razorpay.orders.create).not.toHaveBeenCalled();
@@ -158,9 +164,10 @@ describe("order.controller", () => {
                 items: [{ product: { _id: "p1", name: "Widget", price: 10, stock: 5 }, quantity: 2 }],
                 save: jest.fn().mockResolvedValue(true)
             };
-            Cart.findOne.mockReturnValue({ populate: jest.fn().mockResolvedValue(cart) });
+            Cart.findOne.mockReturnValue(sessionCart(cart));
+            Product.updateOne.mockResolvedValue({ modifiedCount: cart.items[0].product.stock >= cart.items[0].quantity ? 1 : 0 });
             const order = { _id: "order-1", save: jest.fn().mockResolvedValue(true) };
-            Order.create.mockResolvedValue(order);
+            Order.create.mockResolvedValue([order]);
             Order.findById.mockReturnValue({
                 populate: jest.fn().mockResolvedValue({ user: { name: "Jane", email: "jane@example.com", role: "customer" } })
             });
@@ -183,8 +190,9 @@ describe("order.controller", () => {
                 items: [{ product: { _id: "p1", name: "Widget", price: 10, stock: 5 }, quantity: 1 }],
                 save: jest.fn().mockResolvedValue(true)
             };
-            Cart.findOne.mockReturnValue({ populate: jest.fn().mockResolvedValue(cart) });
-            Order.create.mockResolvedValue({ _id: "order-1", save: jest.fn() });
+            Cart.findOne.mockReturnValue(sessionCart(cart));
+            Product.updateOne.mockResolvedValue({ modifiedCount: cart.items[0].product.stock >= cart.items[0].quantity ? 1 : 0 });
+            Order.create.mockResolvedValue([{ _id: "order-1", save: jest.fn() }]);
 
             const req = { user: { id: "user-1" }, body: { paymentMethod: "COD" } };
             const res = mockResponse();
@@ -286,10 +294,23 @@ describe("order.controller", () => {
 
         });
 
+        it("rejects when the order has not been shipped yet", async () => {
+
+            Order.findById.mockReturnValue({ populate: jest.fn().mockResolvedValue({ orderStatus: "Processing", save: jest.fn() }) });
+
+            const res = mockResponse();
+
+            await orderController.generateDeliveryOtp({ params: { id: "order-1" } }, res);
+
+            expect(res.status).toHaveBeenCalledWith(400);
+            expect(sendEmail).not.toHaveBeenCalled();
+
+        });
+
         it("generates an OTP, sends the email, and saves the hashed value", async () => {
 
             const order = {
-                orderStatus: "Processing",
+                orderStatus: "Shipped",
                 user: { name: "Jane", email: "jane@example.com" },
                 save: jest.fn().mockResolvedValue(true)
             };
@@ -311,7 +332,7 @@ describe("order.controller", () => {
         it("clears the OTP and returns 500 when sending the email fails", async () => {
 
             const order = {
-                orderStatus: "Processing",
+                orderStatus: "Shipped",
                 user: { name: "Jane", email: "jane@example.com" },
                 save: jest.fn().mockResolvedValue(true)
             };
@@ -378,7 +399,7 @@ describe("order.controller", () => {
 
             Order.findById.mockReturnValue({
                 select: jest.fn().mockResolvedValue({
-                    orderStatus: "Processing",
+                    orderStatus: "Shipped",
                     deliveryOtp: hashOtp("123456"),
                     deliveryOtpExpire: Date.now() - 1000
                 })
@@ -400,7 +421,7 @@ describe("order.controller", () => {
 
             Order.findById.mockReturnValue({
                 select: jest.fn().mockResolvedValue({
-                    orderStatus: "Processing",
+                    orderStatus: "Shipped",
                     deliveryOtp: hashOtp("123456"),
                     deliveryOtpExpire: Date.now() + 60000
                 })
@@ -420,7 +441,7 @@ describe("order.controller", () => {
 
             const order = {
                 _id: "order-1",
-                orderStatus: "Processing",
+                orderStatus: "Shipped",
                 paymentMethod: "COD",
                 deliveryOtp: hashOtp("123456"),
                 deliveryOtpExpire: Date.now() + 60000,
@@ -450,7 +471,7 @@ describe("order.controller", () => {
 
             const order = {
                 _id: "order-1",
-                orderStatus: "Processing",
+                orderStatus: "Shipped",
                 paymentMethod: "COD",
                 deliveryOtp: hashOtp("123456"),
                 deliveryOtpExpire: Date.now() + 60000,
@@ -474,7 +495,7 @@ describe("order.controller", () => {
         it("marks a non-COD order Delivered without altering paymentStatus", async () => {
 
             const order = {
-                orderStatus: "Processing",
+                orderStatus: "Shipped",
                 paymentMethod: "CARD",
                 deliveryOtp: hashOtp("123456"),
                 deliveryOtpExpire: Date.now() + 60000,
@@ -703,6 +724,39 @@ describe("order.controller", () => {
 
             expect(order.orderStatus).toBe("Shipped");
             expect(res.status).toHaveBeenCalledWith(200);
+
+        });
+
+        it("lets an admin move a pending COD order to Processing", async () => {
+
+            const order = { orderStatus: "Pending", paymentMethod: "COD", save: jest.fn().mockResolvedValue(true) };
+            Order.findById.mockResolvedValue(order);
+
+            const res = mockResponse();
+
+            await orderController.updateOrderStatus({ params: { id: "order-1" }, body: { orderStatus: "Processing" } }, res);
+
+            expect(order.orderStatus).toBe("Processing");
+            expect(res.status).toHaveBeenCalledWith(200);
+
+        });
+
+        it.each([
+            ["an unpaid online order to Processing", { orderStatus: "Pending", paymentMethod: "UPI", paymentStatus: "Pending" }, "Processing"],
+            ["a pending order straight to Shipped", { orderStatus: "Pending", paymentMethod: "COD" }, "Shipped"],
+            ["a shipped order back to Processing", { orderStatus: "Shipped", paymentMethod: "COD" }, "Processing"]
+        ])("rejects moving %s", async (_label, current, nextStatus) => {
+
+            const order = { ...current, save: jest.fn() };
+            Order.findById.mockResolvedValue(order);
+
+            const res = mockResponse();
+
+            await orderController.updateOrderStatus({ params: { id: "order-1" }, body: { orderStatus: nextStatus } }, res);
+
+            expect(res.status).toHaveBeenCalledWith(400);
+            expect(order.save).not.toHaveBeenCalled();
+            expect(order.orderStatus).toBe(current.orderStatus);
 
         });
 

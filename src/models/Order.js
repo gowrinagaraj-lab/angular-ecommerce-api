@@ -76,6 +76,23 @@ const orderSchema = new mongoose.Schema(
             type: String
         },
 
+        paymentFailureReason: {
+            type: String
+        },
+
+        paymentConfirmedAt: {
+            type: Date
+        },
+
+        paymentConfirmationSource: {
+            type: String,
+            enum: ["payment-verification", "webhook", "reconciliation"]
+        },
+
+        lastReconciledAt: {
+            type: Date
+        },
+
         orderStatus: {
             type: String,
             enum: [
@@ -115,6 +132,8 @@ orderSchema.index(
         partialFilterExpression: { paymentVerificationKey: { $type: "string" } }
     }
 );
+
+orderSchema.index({ paymentStatus: 1, createdAt: 1 });
 
 orderSchema.index(
     { razorpayPaymentId: 1 },

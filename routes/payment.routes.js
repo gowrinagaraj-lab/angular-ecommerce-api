@@ -4,12 +4,17 @@ const { body, header } = require("express-validator");
 const router = express.Router();
 
 const protect = require("../src/middleware/auth.middleware");
+const authorize = require("../src/middleware/authorize.middleware");
 
-const { verifyPayment } = require("../controllers/payment.controller");
+const { verifyPayment, handleWebhook } = require("../controllers/payment.controller");
+
+// Called by Razorpay, authenticated by the X-Razorpay-Signature header
+router.post("/webhook", handleWebhook);
 
 router.post(
     "/verify",
     protect,
+    authorize("customer"),
     [
         header("idempotency-key")
             .trim()
