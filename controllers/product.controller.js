@@ -2,6 +2,8 @@ const mongoose = require("mongoose");
 const Product = require("../src/models/Product");
 const Category = require("../src/models/Category");
 const { listProducts } = require("../services/product.service");
+const { checkLowStock, getInventorySummary } = require("../services/inventory.service");
+const { publishProductChange } = require("../src/realtime/productEvents");
 const { sendSuccess, sendError } = require("../src/utils/response");
 
 /*
@@ -37,6 +39,10 @@ exports.createProduct = async (req, res) => {
     }
 
     const product = await Product.create(req.body);
+
+    void checkLowStock([product._id]);
+
+    void publishProductChange("insert", product);
 
     sendSuccess(res, 201, { message: "Product created successfully", data: product });
 
@@ -125,6 +131,13 @@ exports.updateProduct = async (req, res) => {
       return sendError(res, 404, "Product not found");
     }
 
+    // A stock or threshold change may cross the low-stock line either way
+    if (req.body.stock !== undefined || req.body.lowStockThreshold !== undefined) {
+      void checkLowStock([product._id]);
+    }
+
+    void publishProductChange("update", product);
+
     sendSuccess(res, 200, { message: "Product updated successfully", data: product });
   } catch (error) {
     if (error.code === 11000) {
@@ -149,8 +162,24 @@ exports.deleteProduct = async (req, res) => {
       return sendError(res, 404, "Product not found");
     }
 
+    void publishProductChange("delete", { _id: product._id, name: product.name });
+
     sendSuccess(res, 200, { message: "Product deleted successfully" });
 
+  } catch (error) {
+    sendError(res, 500, error.message);
+  }
+};
+
+/*
+Inventory Summary (Admin)
+GET /api/products/admin/inventory
+*/
+exports.getInventorySummary = async (req, res) => {
+  try {
+    const data = await getInventorySummary();
+
+    sendSuccess(res, 200, { data });
   } catch (error) {
     sendError(res, 500, error.message);
   }

@@ -1,9 +1,12 @@
 jest.mock("../../src/models/Product");
 jest.mock("../../src/models/Category");
+jest.mock("../../services/inventory.service");
+jest.mock("../../src/realtime/productEvents");
 
 const mongoose = require("mongoose");
 const Product = require("../../src/models/Product");
 const Category = require("../../src/models/Category");
+const { publishProductChange } = require("../../src/realtime/productEvents");
 const productController = require("../../controllers/product.controller");
 const { mockResponse, mockIoApp } = require("../helpers/mockRes");
 
@@ -68,7 +71,7 @@ describe("product.controller", () => {
             await productController.createProduct(req, res);
 
             expect(res.status).toHaveBeenCalledWith(201);
-            expect(req.app.get).toHaveBeenCalledWith("io");
+            expect(publishProductChange).toHaveBeenCalledWith("insert", expect.objectContaining({ _id: "p1" }));
 
         });
 
@@ -142,7 +145,7 @@ describe("product.controller", () => {
             await productController.getProducts(req, res);
 
             expect(query.select).toHaveBeenCalledWith(
-                "name description price stock category brand images mainImage rating totalReviews isActive createdAt updatedAt"
+                "name description price stock lowStockThreshold category brand images mainImage rating totalReviews isActive createdAt updatedAt"
             );
 
         });
@@ -324,7 +327,7 @@ describe("product.controller", () => {
             await productController.updateProduct(req, res);
 
             expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ success: true, data: updated }));
-            expect(req.app.get).toHaveBeenCalledWith("io");
+            expect(publishProductChange).toHaveBeenCalledWith("update", updated);
 
         });
 
@@ -372,7 +375,7 @@ describe("product.controller", () => {
             await productController.deleteProduct(req, res);
 
             expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ success: true }));
-            expect(req.app.get).toHaveBeenCalledWith("io");
+            expect(publishProductChange).toHaveBeenCalledWith("delete", expect.objectContaining({ _id: "p1" }));
 
         });
 

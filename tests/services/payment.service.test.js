@@ -2,8 +2,13 @@ jest.mock("../../src/models/Order");
 jest.mock("../../src/models/Product");
 jest.mock("../../src/models/Cart");
 jest.mock("../../src/utils/runInTransaction");
+jest.mock("../../services/inventory.service", () => ({
+    ...jest.requireActual("../../services/inventory.service"),
+    afterStockChange: jest.fn().mockResolvedValue()
+}));
 
 const runInTransaction = require("../../src/utils/runInTransaction");
+const { afterStockChange } = require("../../services/inventory.service");
 const Order = require("../../src/models/Order");
 const Product = require("../../src/models/Product");
 const Cart = require("../../src/models/Cart");
@@ -54,6 +59,30 @@ describe("payment.service", () => {
             expect(order.paymentConfirmedAt).toBeInstanceOf(Date);
             expect(Cart.updateOne).toHaveBeenCalledWith({ user: "user-1" }, { $set: { items: [] } }, { session });
             expect(result).toEqual({ order, alreadyPaid: false });
+        });
+
+        it("does not take stock again when the order already reserved it at checkout", async () => {
+            const order = { ...pendingOrder(), stockDeducted: true, reservationExpiresAt: new Date() };
+            Order.findOne.mockReturnValueOnce(withSession(order));
+
+            const result = await finalizePaidOrder({ razorpayOrderId: "order_1", razorpayPaymentId: "pay_1" });
+
+            expect(Product.updateOne).not.toHaveBeenCalled();
+            expect(afterStockChange).not.toHaveBeenCalled();
+            expect(order.paymentStatus).toBe("Paid");
+            expect(order.reservationExpiresAt).toBeUndefined();
+            expect(result.alreadyPaid).toBe(false);
+        });
+
+        it("takes stock and checks low-stock levels for an order without a reservation", async () => {
+            const order = pendingOrder();
+            Order.findOne.mockReturnValueOnce(withSession(order));
+            Product.updateOne.mockResolvedValue({ modifiedCount: 1 });
+
+            await finalizePaidOrder({ razorpayOrderId: "order_1", razorpayPaymentId: "pay_1" });
+
+            expect(order.stockDeducted).toBe(true);
+            expect(afterStockChange).toHaveBeenCalledWith(["p1"]);
         });
 
         it("scopes the lookup to the user when one is given", async () => {

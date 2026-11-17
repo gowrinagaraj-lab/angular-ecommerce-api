@@ -1,7 +1,7 @@
 const Cart = require("../src/models/Cart");
 const Order = require("../src/models/Order");
-const Product = require("../src/models/Product");
 const runInTransaction = require("../src/utils/runInTransaction");
+const { deductStock, afterStockChange } = require("./inventory.service");
 
 const createRequestError = (statusCode, message) => {
     const error = new Error(message);
@@ -10,8 +10,10 @@ const createRequestError = (statusCode, message) => {
 };
 
 /*
-Mark an order as paid: decrement stock, confirm the order and clear the
-user's cart in one transaction. Safe to call repeatedly from the client
+Mark an order as paid: confirm the order and clear the user's cart in one
+transaction. Stock was normally reserved at checkout; it is only taken here
+for orders that no longer hold it (placed before reservations existed, or
+released after the payment window expired and then paid late). Safe to call repeatedly from the client
 verify route, the webhook and the reconciliation job — an order that is
 already Paid is returned untouched.
 */
@@ -24,7 +26,7 @@ const finalizePaidOrder = async ({
     idempotencyKey,
     source
 }) => {
-    return runInTransaction(async (session) => {
+    const result = await runInTransaction(async (session) => {
         const filter = { razorpayOrderId };
 
         if (userId) {
@@ -54,17 +56,14 @@ const finalizePaidOrder = async ({
             order.paymentVerificationKey = idempotencyKey;
         }
 
-        for (const item of order.items) {
-            const stockUpdate = await Product.updateOne(
-                { _id: item.product, stock: { $gte: item.quantity } },
-                { $inc: { stock: -item.quantity } },
-                { session }
-            );
+        const needsStock = !order.stockDeducted;
 
-            if (stockUpdate.modifiedCount !== 1) {
-                throw createRequestError(400, `${item.name} is out of stock`);
-            }
+        if (needsStock) {
+            await deductStock(order.items, session);
+            order.stockDeducted = true;
         }
+
+        order.reservationExpiresAt = undefined;
 
         order.paymentStatus = "Paid";
         order.orderStatus = "Processing";
@@ -85,8 +84,14 @@ const finalizePaidOrder = async ({
             { session }
         );
 
-        return { order, alreadyPaid: false };
+        return { order, alreadyPaid: false, stockTaken: needsStock };
     });
+
+    if (result.stockTaken) {
+        void afterStockChange(result.order.items.map((item) => item.product));
+    }
+
+    return { order: result.order, alreadyPaid: result.alreadyPaid };
 };
 
 /*

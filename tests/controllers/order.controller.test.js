@@ -9,6 +9,12 @@ jest.mock("../../utils/notification", () => ({
 jest.mock("../../src/config/razorpay", () => ({
     orders: { create: jest.fn() }
 }));
+// Real stock deduction (against the mocked Product model); alerts and releases are stubbed
+jest.mock("../../services/inventory.service", () => ({
+    ...jest.requireActual("../../services/inventory.service"),
+    afterStockChange: jest.fn().mockResolvedValue(),
+    releaseOrderReservation: jest.fn().mockResolvedValue(null)
+}));
 jest.mock("../../src/utils/runInTransaction", () => jest.fn((work) => work(null)));
 jest.mock("express-validator", () => ({
     validationResult: jest.fn()
@@ -23,6 +29,7 @@ const Product = require("../../src/models/Product");
 const Address = require("../../src/models/Address");
 const razorpay = require("../../src/config/razorpay");
 const sendEmail = require("../../utils/sendEmail");
+const { afterStockChange, releaseOrderReservation } = require("../../services/inventory.service");
 
 const orderController = require("../../controllers/order.controller");
 const { mockResponse } = require("../helpers/mockRes");
@@ -204,16 +211,17 @@ describe("order.controller", () => {
 
         });
 
-        it("creates a Razorpay order for CARD/UPI and does not touch stock or cart yet", async () => {
+        it("reserves stock for CARD/UPI, creates a Razorpay order, and keeps the cart until payment", async () => {
 
             Address.findOne.mockResolvedValue(address);
             const cart = {
                 items: [{ product: { _id: "p1", name: "Widget", price: 10, stock: 5 }, quantity: 1 }],
                 save: jest.fn().mockResolvedValue(true)
             };
-            Cart.findOne.mockReturnValue({ populate: jest.fn().mockResolvedValue(cart) });
-            const order = { _id: "order-1", save: jest.fn().mockResolvedValue(true) };
-            Order.create.mockResolvedValue(order);
+            Cart.findOne.mockReturnValue(sessionCart(cart));
+            Product.updateOne.mockResolvedValue({ modifiedCount: 1 });
+            const order = { _id: "order-1", items: [{ product: "p1", quantity: 1 }], save: jest.fn().mockResolvedValue(true) };
+            Order.create.mockResolvedValue([order]);
             Order.findById.mockReturnValue({
                 populate: jest.fn().mockResolvedValue({ user: { name: "Jane", email: "jane@example.com", role: "customer" } })
             });
@@ -227,14 +235,41 @@ describe("order.controller", () => {
             expect(razorpay.orders.create).toHaveBeenCalledWith(expect.objectContaining({ amount: 1000, currency: "INR" }));
             expect(order.razorpayOrderId).toBe("rzp_order_1");
             expect(order.save).toHaveBeenCalled();
-            expect(Product.findByIdAndUpdate).not.toHaveBeenCalled();
+            expect(Product.updateOne).toHaveBeenCalledWith({ _id: "p1", stock: { $gte: 1 } }, { $inc: { stock: -1 } }, { session: null });
+            expect(Order.create).toHaveBeenCalledWith([expect.objectContaining({
+                paymentMethod: "CARD",
+                stockDeducted: true,
+                reservationExpiresAt: expect.any(Date)
+            })], { session: null });
             expect(cart.save).not.toHaveBeenCalled();
+            expect(afterStockChange).toHaveBeenCalledWith(["p1"]);
             expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({ to: "jane@example.com" }));
             expect(res.status).toHaveBeenCalledWith(201);
             expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
                 message: "Order created, awaiting payment",
                 razorpay: expect.objectContaining({ orderId: "rzp_order_1" })
             }));
+
+        });
+
+        it("releases the reserved stock when the Razorpay order cannot be created", async () => {
+
+            Address.findOne.mockResolvedValue(address);
+            const cart = {
+                items: [{ product: { _id: "p1", name: "Widget", price: 10, stock: 5 }, quantity: 1 }],
+                save: jest.fn().mockResolvedValue(true)
+            };
+            Cart.findOne.mockReturnValue(sessionCart(cart));
+            Product.updateOne.mockResolvedValue({ modifiedCount: 1 });
+            Order.create.mockResolvedValue([{ _id: "order-1", save: jest.fn() }]);
+            razorpay.orders.create.mockRejectedValue(new Error("Razorpay down"));
+
+            const res = mockResponse();
+
+            await orderController.checkout({ user: { id: "user-1" }, body: { addressId: "addr-1", paymentMethod: "UPI" } }, res);
+
+            expect(releaseOrderReservation).toHaveBeenCalledWith("order-1", "Unable to start payment");
+            expect(res.status).toHaveBeenCalledWith(502);
 
         });
 
@@ -837,8 +872,9 @@ describe("order.controller", () => {
 
             await orderController.cancelOrder(req, res);
 
-            expect(Product.findByIdAndUpdate).toHaveBeenCalledWith("p1", { $inc: { stock: 3 } });
+            expect(Product.updateOne).toHaveBeenCalledWith({ _id: "p1" }, { $inc: { stock: 3 } }, { session: undefined });
             expect(order.orderStatus).toBe("Cancelled");
+            expect(order.stockDeducted).toBe(false);
             expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({
                 to: "jane@example.com",
                 subject: expect.stringContaining("Cancelled")
@@ -864,7 +900,32 @@ describe("order.controller", () => {
 
             await orderController.cancelOrder(req, res);
 
-            expect(Product.findByIdAndUpdate).not.toHaveBeenCalled();
+            expect(Product.updateOne).not.toHaveBeenCalled();
+            expect(order.orderStatus).toBe("Cancelled");
+
+        });
+
+        it("returns reserved stock when cancelling an unpaid online order", async () => {
+
+            const order = {
+                user: { toString: () => "user-1" },
+                orderStatus: "Pending",
+                paymentMethod: "UPI",
+                paymentStatus: "Pending",
+                stockDeducted: true,
+                reservationExpiresAt: new Date(),
+                items: [{ product: "p1", quantity: 2 }],
+                save: jest.fn().mockResolvedValue(true)
+            };
+            Order.findById.mockResolvedValue(order);
+
+            const res = mockResponse();
+
+            await orderController.cancelOrder({ params: { id: "order-1" }, user: { id: "user-1", role: "customer" } }, res);
+
+            expect(Product.updateOne).toHaveBeenCalledWith({ _id: "p1" }, { $inc: { stock: 2 } }, { session: undefined });
+            expect(order.stockDeducted).toBe(false);
+            expect(order.reservationExpiresAt).toBeUndefined();
             expect(order.orderStatus).toBe("Cancelled");
 
         });

@@ -42,13 +42,13 @@ const listProducts = async (query = {}) => {
             }
 
             filter.category = matchedCategory._id;
-        }
+        } 
     }
 
     const total = await Product.countDocuments(filter);
 
     const products = await Product.find(filter)
-        .select("name description price stock category brand images mainImage rating totalReviews isActive createdAt updatedAt")
+        .select("name description price stock lowStockThreshold category brand images mainImage rating totalReviews isActive createdAt updatedAt")
         .populate("category", "name")
         .sort(sort)
         .skip(skip)

@@ -2,13 +2,20 @@ const crypto = require("crypto");
 const { validationResult } = require("express-validator");
 const Cart = require("../src/models/Cart");
 const Order = require("../src/models/Order");
-const Product = require("../src/models/Product");
 const Address = require("../src/models/Address");
 const razorpay = require("../src/config/razorpay");
 const sendEmail = require("../utils/sendEmail");
 const { createUserNotification } = require("../utils/notification");
 const { sendSuccess, sendError } = require("../src/utils/response");
 const runInTransaction = require("../src/utils/runInTransaction");
+const {
+    ONLINE_METHODS,
+    getReservationExpiry,
+    deductStock,
+    restoreStock,
+    releaseOrderReservation,
+    afterStockChange
+} = require("../services/inventory.service");
 
 const createRequestError = (statusCode, message) => {
     const error = new Error(message);
@@ -166,62 +173,13 @@ const transactionalCheckout = async (req, res) => {
             };
         }
 
-        if (paymentMethod === "CARD" || paymentMethod === "UPI") {
-            const cart = await Cart.findOne({ user: userId }).populate("items.product");
-
-            if (!cart || cart.items.length === 0) {
-                return sendError(res, 400, "Cart is empty");
-            }
-
-            const { items: orderItems, grandTotal } = createOrderItems(cart);
-
-            for (const item of cart.items) {
-                if (item.product.stock < item.quantity) {
-                    return sendError(res, 400, `${item.product.name} is out of stock`);
-                }
-            }
-
-            const order = await Order.create({
-                user: userId,
-                items: orderItems,
-                shippingAddress,
-                paymentMethod,
-                totalAmount: grandTotal
-            });
-
-            try {
-                const razorpayOrder = await razorpay.orders.create({
-                    amount: Math.round(grandTotal * 100),
-                    currency: "INR",
-                    receipt: order._id.toString()
-                });
-
-                order.razorpayOrderId = razorpayOrder.id;
-                await order.save();
-
-                await sendOrderCreatedMessages({ order, userId, orderItems, grandTotal, paymentMethod });
-
-                return sendSuccess(res, 201, {
-                    message: "Order created, awaiting payment",
-                    data: order,
-                    razorpay: {
-                        orderId: razorpayOrder.id,
-                        amount: razorpayOrder.amount,
-                        currency: razorpayOrder.currency,
-                        keyId: process.env.RAZORPAY_KEY_ID
-                    }
-                });
-            } catch (paymentSetupError) {
-                order.paymentStatus = "Failed";
-                await order.save();
-                return sendError(res, 502, "Unable to start payment. Please try again.");
-            }
-        }
-
+        const isOnlinePayment = ONLINE_METHODS.includes(paymentMethod);
         let order;
         let orderItems;
         let grandTotal;
 
+        // Stock is taken here for every payment method, so it is reserved while
+        // an online payment is in progress and nobody else can buy the same units.
         await runInTransaction(async (session) => {
             const cart = await Cart.findOne({ user: userId })
                 .populate("items.product")
@@ -233,29 +191,58 @@ const transactionalCheckout = async (req, res) => {
 
             ({ items: orderItems, grandTotal } = createOrderItems(cart));
 
-            for (const item of cart.items) {
-                const stockUpdate = await Product.updateOne(
-                    { _id: item.product._id, stock: { $gte: item.quantity } },
-                    { $inc: { stock: -item.quantity } },
-                    { session }
-                );
-
-                if (stockUpdate.modifiedCount !== 1) {
-                    throw createRequestError(400, `${item.product.name} is out of stock`);
-                }
-            }
+            await deductStock(orderItems, session);
 
             [order] = await Order.create([{
                 user: userId,
                 items: orderItems,
                 shippingAddress,
                 paymentMethod,
-                totalAmount: grandTotal
+                totalAmount: grandTotal,
+                stockDeducted: true,
+                reservationExpiresAt: isOnlinePayment ? getReservationExpiry() : undefined
             }], { session });
 
-            cart.items = [];
-            await cart.save({ session });
+            // Online orders keep the cart until payment is confirmed
+            if (!isOnlinePayment) {
+                cart.items = [];
+                await cart.save({ session });
+            }
         });
+
+        void afterStockChange(orderItems.map((item) => item.product));
+
+        if (isOnlinePayment) {
+            let razorpayOrder;
+
+            try {
+                razorpayOrder = await razorpay.orders.create({
+                    amount: Math.round(grandTotal * 100),
+                    currency: "INR",
+                    receipt: order._id.toString()
+                });
+
+                order.razorpayOrderId = razorpayOrder.id;
+                await order.save();
+            } catch (paymentSetupError) {
+                await releaseOrderReservation(order._id, "Unable to start payment");
+                return sendError(res, 502, "Unable to start payment. Please try again.");
+            }
+
+            await sendOrderCreatedMessages({ order, userId, orderItems, grandTotal, paymentMethod });
+
+            return sendSuccess(res, 201, {
+                message: "Order created, awaiting payment",
+                data: order,
+                razorpay: {
+                    orderId: razorpayOrder.id,
+                    amount: razorpayOrder.amount,
+                    currency: razorpayOrder.currency,
+                    keyId: process.env.RAZORPAY_KEY_ID
+                },
+                reservationExpiresAt: order.reservationExpiresAt
+            });
+        }
 
         await sendOrderCreatedMessages({ order, userId, orderItems, grandTotal, paymentMethod });
 
@@ -750,29 +737,28 @@ exports.cancelOrder = async (req, res) => {
 
         }
 
-        if (order.paymentMethod === "COD" || order.paymentStatus === "Paid") {
+        // Orders placed before stock reservations existed have no stockDeducted flag
+        const holdsStock = order.stockDeducted ?? (order.paymentMethod === "COD" || order.paymentStatus === "Paid");
 
-            for (const item of order.items) {
+        if (holdsStock) {
 
-                await Product.findByIdAndUpdate(
+            await restoreStock(order.items);
 
-                    item.product,
+            order.stockDeducted = false;
 
-                    {
-                        $inc: {
-                            stock: item.quantity
-                        }
-                    }
-
-                );
-
-            }
+            order.reservationExpiresAt = undefined;
 
         }
 
         order.orderStatus = "Cancelled";
 
         await order.save();
+
+        if (holdsStock) {
+
+            void afterStockChange(order.items.map((item) => item.product));
+
+        }
 
         await createUserNotification({
             userId: order.user,

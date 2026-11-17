@@ -93,6 +93,17 @@ const orderSchema = new mongoose.Schema(
             type: Date
         },
 
+        // True while this order holds stock (reserved at checkout, kept once paid).
+        // No default, so orders created before reservations existed stay undefined.
+        stockDeducted: {
+            type: Boolean
+        },
+
+        // Unpaid online orders release their reserved stock after this time
+        reservationExpiresAt: {
+            type: Date
+        },
+
         orderStatus: {
             type: String,
             enum: [
@@ -134,6 +145,11 @@ orderSchema.index(
 );
 
 orderSchema.index({ paymentStatus: 1, createdAt: 1 });
+
+orderSchema.index(
+    { reservationExpiresAt: 1 },
+    { partialFilterExpression: { stockDeducted: true } }
+);
 
 orderSchema.index(
     { razorpayPaymentId: 1 },

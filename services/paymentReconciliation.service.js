@@ -1,6 +1,8 @@
 const Order = require("../src/models/Order");
 const razorpay = require("../src/config/razorpay");
 const { finalizePaidOrder, markPaymentFailed } = require("./payment.service");
+const { ONLINE_METHODS, releaseOrderReservation } = require("./inventory.service");
+const { createUserNotification } = require("../utils/notification");
 
 const MINUTE_MS = 60 * 1000;
 
@@ -70,6 +72,65 @@ const reconcilePendingPayments = async ({
 };
 
 /*
+Give back stock held by online orders whose payment window has passed.
+Razorpay is asked first, so a payment that was captured but never reported
+confirms the order instead of losing its stock.
+*/
+
+const releaseExpiredReservations = async ({ limit = 100 } = {}) => {
+    const orders = await Order.find({
+        paymentMethod: { $in: ONLINE_METHODS },
+        orderStatus: "Pending",
+        paymentStatus: { $ne: "Paid" },
+        stockDeducted: true,
+        reservationExpiresAt: { $lte: new Date() }
+    })
+        .sort({ reservationExpiresAt: 1 })
+        .limit(limit);
+
+    const summary = { expired: orders.length, released: 0, paid: 0, errors: 0 };
+
+    for (const order of orders) {
+        try {
+            if (order.razorpayOrderId) {
+                const { items: payments = [] } = await razorpay.orders.fetchPayments(order.razorpayOrderId);
+                const captured = payments.find((payment) => payment.status === "captured");
+
+                if (captured) {
+                    await finalizePaidOrder({
+                        razorpayOrderId: order.razorpayOrderId,
+                        razorpayPaymentId: captured.id,
+                        source: "reconciliation"
+                    });
+                    summary.paid += 1;
+                    continue;
+                }
+            }
+
+            const released = await releaseOrderReservation(order._id, "Payment was not completed in time");
+
+            if (released) {
+                summary.released += 1;
+
+                await createUserNotification({
+                    userId: released.user,
+                    title: "Order cancelled",
+                    message: `Your order #${released._id} was cancelled because payment was not completed in time.`,
+                    type: "order",
+                    link: `/orders/${released._id}`,
+                    metadata: { orderId: released._id, orderStatus: released.orderStatus }
+                });
+            }
+        } catch (error) {
+            summary.errors += 1;
+            console.error(`Releasing reservation for order ${order._id} failed:`, error.message);
+        }
+    }
+
+    return summary;
+};
+
+/*
 Run reconciliation on an interval. Configure with:
   PAYMENT_RECONCILIATION_ENABLED     (default true; "false" disables)
   PAYMENT_RECONCILIATION_INTERVAL_MS (default 5 min, min 1 min)
@@ -102,6 +163,15 @@ const startPaymentReconciliation = () => {
                     `${summary.failed} failed, ${summary.errors} errors`
                 );
             }
+
+            const reservations = await releaseExpiredReservations();
+
+            if (reservations.expired > 0) {
+                console.log(
+                    `Stock reservations: ${reservations.expired} expired, ${reservations.released} released, ` +
+                    `${reservations.paid} paid late, ${reservations.errors} errors`
+                );
+            }
         } catch (error) {
             console.error("Payment reconciliation run failed:", error.message);
         } finally {
@@ -116,4 +186,4 @@ const startPaymentReconciliation = () => {
     return timer;
 };
 
-module.exports = { reconcilePendingPayments, startPaymentReconciliation };
+module.exports = { reconcilePendingPayments, releaseExpiredReservations, startPaymentReconciliation };

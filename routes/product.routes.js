@@ -15,7 +15,9 @@ const {
 
     updateProduct,
 
-    deleteProduct
+    deleteProduct,
+
+    getInventorySummary
 
 } = require("../controllers/product.controller");
 
@@ -24,6 +26,9 @@ const {
 router.post("/", protect, authorize('admin'), createProduct);
 
 router.get("/", protect, getProducts);
+
+// Registered before "/:id" so "admin" is not read as a product id
+router.get("/admin/inventory", protect, authorize("admin"), getInventorySummary);
 
 router.get("/:id", getProductById);
 

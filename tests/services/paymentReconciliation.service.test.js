@@ -1,5 +1,10 @@
 jest.mock("../../src/models/Order");
 jest.mock("../../services/payment.service");
+jest.mock("../../services/inventory.service", () => ({
+    ONLINE_METHODS: ["CARD", "UPI"],
+    releaseOrderReservation: jest.fn()
+}));
+jest.mock("../../utils/notification", () => ({ createUserNotification: jest.fn() }));
 jest.mock("../../src/config/razorpay", () => ({
     orders: { fetchPayments: jest.fn() }
 }));
@@ -7,7 +12,9 @@ jest.mock("../../src/config/razorpay", () => ({
 const Order = require("../../src/models/Order");
 const razorpay = require("../../src/config/razorpay");
 const { finalizePaidOrder, markPaymentFailed } = require("../../services/payment.service");
-const { reconcilePendingPayments } = require("../../services/paymentReconciliation.service");
+const { releaseOrderReservation } = require("../../services/inventory.service");
+const { createUserNotification } = require("../../utils/notification");
+const { reconcilePendingPayments, releaseExpiredReservations } = require("../../services/paymentReconciliation.service");
 
 const mockOrders = (orders) => {
     const query = { sort: jest.fn().mockReturnThis(), limit: jest.fn().mockResolvedValue(orders) };
@@ -98,4 +105,47 @@ describe("paymentReconciliation.service", () => {
         expect(summary).toEqual({ checked: 2, paid: 1, failed: 0, errors: 1 });
     });
 
+    describe("releaseExpiredReservations", () => {
+
+        it("releases unpaid expired reservations and tells the customer", async () => {
+            mockOrders([{ _id: "o1", razorpayOrderId: "order_1" }]);
+            razorpay.orders.fetchPayments.mockResolvedValue({ items: [{ id: "pay_fail", status: "failed" }] });
+            releaseOrderReservation.mockResolvedValue({ _id: "o1", user: "user-1", orderStatus: "Cancelled" });
+
+            const summary = await releaseExpiredReservations();
+
+            const filter = Order.find.mock.calls[0][0];
+            expect(filter).toMatchObject({ stockDeducted: true, orderStatus: "Pending", paymentStatus: { $ne: "Paid" } });
+            expect(filter.reservationExpiresAt.$lte).toBeInstanceOf(Date);
+            expect(releaseOrderReservation).toHaveBeenCalledWith("o1", "Payment was not completed in time");
+            expect(createUserNotification).toHaveBeenCalledWith(expect.objectContaining({ userId: "user-1", title: "Order cancelled" }));
+            expect(summary).toEqual({ expired: 1, released: 1, paid: 0, errors: 0 });
+        });
+
+        it("confirms the order instead when Razorpay captured a payment", async () => {
+            mockOrders([{ _id: "o1", razorpayOrderId: "order_1" }]);
+            razorpay.orders.fetchPayments.mockResolvedValue({ items: [{ id: "pay_ok", status: "captured" }] });
+            finalizePaidOrder.mockResolvedValue({ alreadyPaid: false });
+
+            const summary = await releaseExpiredReservations();
+
+            expect(finalizePaidOrder).toHaveBeenCalledWith(expect.objectContaining({ razorpayPaymentId: "pay_ok" }));
+            expect(releaseOrderReservation).not.toHaveBeenCalled();
+            expect(summary.paid).toBe(1);
+        });
+
+        it("does not notify when another process already released the order", async () => {
+            mockOrders([{ _id: "o1" }]);
+            releaseOrderReservation.mockResolvedValue(null);
+
+            const summary = await releaseExpiredReservations();
+
+            expect(razorpay.orders.fetchPayments).not.toHaveBeenCalled();
+            expect(createUserNotification).not.toHaveBeenCalled();
+            expect(summary.released).toBe(0);
+        });
+
+    });
+
 });
+

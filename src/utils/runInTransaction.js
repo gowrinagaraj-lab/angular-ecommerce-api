@@ -57,3 +57,4 @@ const runInTransaction = async (work) => {
 };
 
 module.exports = runInTransaction;
+module.exports.supportsTransactions = supportsTransactions;

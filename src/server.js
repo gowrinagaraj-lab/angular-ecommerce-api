@@ -6,6 +6,8 @@ const { Server } = require("socket.io");
 const app = require("./app");
 const connectDB = require("./config/db");
 const startProductChangeStream = require("./watchers/productChangeStream");
+const { initProductEvents } = require("./realtime/productEvents");
+const { supportsTransactions } = require("./utils/runInTransaction");
 const { startPaymentReconciliation } = require("../services/paymentReconciliation.service");
 
 const DEFAULT_PORT = 5000;
@@ -42,14 +44,24 @@ const io = new Server(server, {
 
 // Make io accessible to controllers via req.app.get("io")
 app.set("io", io);
+initProductEvents(io);
 
-// Connect to MongoDB, then start watching the products collection for
-// changes (API-driven or manual) and broadcast them over the socket.
-connectDB().then(() => {
-    startProductChangeStream(io);
+// Connect to MongoDB, then choose how product changes reach browsers:
+// a change stream on a replica set (also catches manual DB edits), or
+// events published by the API itself on a standalone server.
+connectDB().then(async () => {
+    const replicaSet = await supportsTransactions().catch(() => false);
+
+    if (replicaSet) {
+        startProductChangeStream();
+        console.log("Real-time product updates: MongoDB change stream");
+    } else {
+        console.log("Real-time product updates: in-process events (MongoDB is standalone)");
+    }
+
     startPaymentReconciliation();
 }).catch((error) => {
-    console.error("Product change stream could not start:", error.message);
+    console.error("Startup after database connection failed:", error.message);
 });
 
 // Socket connection

@@ -29,6 +29,18 @@ const productSchema = new mongoose.Schema(
       default: 0
     },
 
+    // Admins are alerted once stock falls to this level or below
+    lowStockThreshold: {
+      type: Number,
+      min: [0, "Low-stock threshold cannot be negative"],
+      default: 5
+    },
+
+    // Set when a low-stock alert has gone out; cleared once stock is back above the threshold
+    lowStockAlertedAt: {
+      type: Date
+    },
+
     category: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Category",
