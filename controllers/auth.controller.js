@@ -187,6 +187,22 @@ exports.login = async (req, res) => {
             });
         }
 
+        if (user.isActive === false) {
+            logSignInActivity({
+                email,
+                user: user._id,
+                req,
+                status: "Failed",
+                failureReason: "Account is suspended"
+            });
+
+            return res.status(403).json({
+                success: false,
+                code: "ACCOUNT_SUSPENDED",
+                message: "Your account has been suspended. Please contact support."
+            });
+        }
+
         const token = generateToken(user._id, user.role);
 
         logSignInActivity({

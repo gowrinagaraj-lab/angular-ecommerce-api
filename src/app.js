@@ -47,6 +47,7 @@ app.use("/api/payments", require("./../routes/payment.routes"));
 app.use("/api/notifications", require("./../routes/notification.routes"));
 app.use("/api/chat", require("./../routes/chat.routes"));
 app.use("/api/reviews", require("./../routes/review.routes"));
+app.use("/api/users", require("./../routes/user.routes"));
 
 app.use(notFoundHandler);
 app.use(errorHandler);
