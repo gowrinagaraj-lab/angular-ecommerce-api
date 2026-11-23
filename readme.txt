@@ -21,7 +21,7 @@ sample product
 
 
 
-// cart + checkout now require: Authorization: Bearer <token from login/register>
+// cart + checkout now require: Authorization: Bearer <token from verified login>
 // userId is taken from the token, not the request body
 
 // cart sample resonse

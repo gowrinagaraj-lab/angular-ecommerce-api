@@ -71,7 +71,8 @@ describe("auth.controller", () => {
                 name: "Jane",
                 email: "jane@example.com",
                 phone: "1234567890",
-                role: "admin"
+                role: "admin",
+                emailVerified: false
             });
 
             const req = { body: { name: "Jane", email: "jane@example.com", password: "password123", phone: "1234567890" } };
@@ -79,11 +80,21 @@ describe("auth.controller", () => {
 
             await authController.register(req, res);
 
-            expect(User.create).toHaveBeenCalledWith(expect.objectContaining({ role: "admin" }));
-            expect(generateToken).toHaveBeenCalledWith("user-1", "admin");
+            expect(User.create).toHaveBeenCalledWith(expect.objectContaining({
+                role: "admin",
+                emailVerified: false,
+                emailVerificationToken: expect.any(String),
+                emailVerificationExpire: expect.any(Number)
+            }));
+            expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({
+                to: "jane@example.com",
+                subject: "Verify your email address"
+            }));
+            expect(generateToken).not.toHaveBeenCalled();
             expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
                 success: true,
-                data: expect.objectContaining({ token: "fake.jwt.token" })
+                retryAfter: 60,
+                data: expect.objectContaining({ user: expect.objectContaining({ emailVerified: false }) })
             }));
 
         });
@@ -106,7 +117,10 @@ describe("auth.controller", () => {
 
             await authController.register(req, res);
 
-            expect(User.create).toHaveBeenCalledWith(expect.objectContaining({ role: "customer" }));
+            expect(User.create).toHaveBeenCalledWith(expect.objectContaining({
+                role: "customer",
+                emailVerified: false
+            }));
 
         });
 
@@ -190,6 +204,33 @@ describe("auth.controller", () => {
 
         });
 
+        it("refuses login and records a failure for unverified accounts", async () => {
+
+            const user = {
+                _id: "user-1",
+                email: "jane@example.com",
+                role: "customer",
+                password: "hashed",
+                emailVerified: false,
+                emailVerificationResendAt: new Date(Date.now() + 30000)
+            };
+            User.findOne.mockReturnValue({ select: jest.fn().mockResolvedValue(user) });
+            bcrypt.compare.mockResolvedValue(true);
+
+            const res = mockResponse();
+
+            await authController.login(req(), res);
+
+            expect(res.status).toHaveBeenCalledWith(403);
+            expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+                success: false,
+                code: "EMAIL_NOT_VERIFIED",
+                email: "jane@example.com"
+            }));
+            expect(generateToken).not.toHaveBeenCalled();
+
+        });
+
         it("logs a successful attempt and returns a token on success", async () => {
 
             const user = { _id: "user-1", name: "Jane", email: "jane@example.com", phone: "123", role: "customer", password: "hashed" };
@@ -211,6 +252,64 @@ describe("auth.controller", () => {
                 success: true,
                 data: expect.objectContaining({ token: "fake.jwt.token" })
             }));
+
+        });
+
+        describe("verifyEmail", () => {
+
+            it("verifies the matching unexpired token and clears verification state", async () => {
+
+                const user = {
+                    emailVerified: false,
+                    emailVerificationToken: "hashed-token",
+                    emailVerificationExpire: new Date(Date.now() + 60000),
+                    emailVerificationResendAt: new Date(Date.now() + 30000),
+                    save: jest.fn().mockResolvedValue(true)
+                };
+                User.findOne.mockResolvedValue(user);
+
+                const req = { body: { token: "raw-token" } };
+                const res = mockResponse();
+
+                await authController.verifyEmail(req, res);
+
+                expect(User.findOne).toHaveBeenCalledWith(expect.objectContaining({
+                    emailVerificationToken: expect.any(String),
+                    emailVerificationExpire: expect.objectContaining({ $gt: expect.any(Number) })
+                }));
+                expect(user.emailVerified).toBe(true);
+                expect(user.emailVerificationToken).toBeUndefined();
+                expect(user.emailVerificationExpire).toBeUndefined();
+                expect(user.emailVerificationResendAt).toBeUndefined();
+                expect(user.save).toHaveBeenCalled();
+                expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ success: true }));
+
+            });
+
+        });
+
+        describe("resendVerification", () => {
+
+            it("honors the resend cooldown without sending another email", async () => {
+
+                const user = {
+                    email: "jane@example.com",
+                    emailVerified: false,
+                    emailVerificationResendAt: new Date(Date.now() + 30000),
+                    save: jest.fn()
+                };
+                User.findOne.mockReturnValue({ select: jest.fn().mockResolvedValue(user) });
+
+                const req = { body: { email: "jane@example.com" } };
+                const res = mockResponse();
+
+                await authController.resendVerification(req, res);
+
+                expect(res.status).toHaveBeenCalledWith(429);
+                expect(user.save).not.toHaveBeenCalled();
+                expect(sendEmail).not.toHaveBeenCalled();
+
+            });
 
         });
 
@@ -324,6 +423,24 @@ describe("auth.controller", () => {
 
             expect(res.status).toHaveBeenCalledWith(400);
             expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ message: "Reset token is invalid or has expired" }));
+
+        });
+
+        it("does not allow an unverified user to gain a session through password reset", async () => {
+
+            User.findOne.mockResolvedValue({
+                emailVerified: false,
+                save: jest.fn()
+            });
+
+            const req = { params: { token: "good-token" }, body: { password: "newpassword" } };
+            const res = mockResponse();
+
+            await authController.resetPassword(req, res);
+
+            expect(res.status).toHaveBeenCalledWith(403);
+            expect(bcrypt.hash).not.toHaveBeenCalled();
+            expect(generateToken).not.toHaveBeenCalled();
 
         });
 

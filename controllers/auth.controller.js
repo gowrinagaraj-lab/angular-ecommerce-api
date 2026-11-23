@@ -8,6 +8,12 @@ const generateToken = require("../utils/generateToken");
 const sendEmail = require("../utils/sendEmail");
 const { sendSuccess, sendError } = require("../src/utils/response");
 
+const createEmailVerificationToken = () => {
+    const token = crypto.randomBytes(32).toString("hex");
+    const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
+    return { token, hashedToken };
+};
+
 const logSignInActivity = ({ email, user, req, status, failureReason }) => {
 
     SignInActivity.create({
@@ -52,6 +58,7 @@ exports.register = async (req, res) => {
         }
 
         const hashedPassword = await bcrypt.hash(password, 10);
+        const { token: verificationToken, hashedToken } = createEmailVerificationToken();
 
         // First registered user becomes admin
         const isFirstAccount = (await User.countDocuments({})) === 0;
@@ -62,22 +69,40 @@ exports.register = async (req, res) => {
             email,
             password: hashedPassword,
             phone,
-            role
+            role,
+            emailVerified: false,
+            emailVerificationToken: hashedToken,
+            emailVerificationExpire: Date.now() + 24 * 60 * 60 * 1000,
+            emailVerificationResendAt: Date.now() + 60 * 1000
         });
 
-        const token = generateToken(user._id, user.role);
+        const verificationUrl = `${process.env.CLIENT_URL}/verify-email/${verificationToken}`;
+        try {
+            await sendEmail({
+                to: user.email,
+                subject: "Verify your email address",
+                html: `<p>Please verify your email address to activate your account.</p><p><a href="${verificationUrl}">Verify email</a></p><p>This link expires in 24 hours.</p>`
+            });
+        } catch (emailError) {
+            user.emailVerificationToken = undefined;
+            user.emailVerificationExpire = undefined;
+            user.emailVerificationResendAt = undefined;
+            await user.save({ validateBeforeSave: false });
+            throw emailError;
+        }
 
         sendSuccess(res, 200, {
-            message: "User registered successfully",
+            message: "Registration successful. Check your email to verify your account.",
+            retryAfter: 60,
             data: {
                 user: {
                     _id: user._id,
                     name: user.name,
                     email: user.email,
                     phone: user.phone,
-                    role: user.role
-                },
-                token
+                    role: user.role,
+                    emailVerified: user.emailVerified
+                }
             }
         });
 
@@ -110,7 +135,8 @@ exports.login = async (req, res) => {
 
         const { email, password } = req.body;
 
-        const user = await User.findOne({ email: email.toLowerCase() }).select("+password");
+        const user = await User.findOne({ email: email.toLowerCase() })
+            .select("+password +emailVerificationResendAt");
 
         if (!user) {
 
@@ -141,6 +167,26 @@ exports.login = async (req, res) => {
 
         }
 
+        if (user.emailVerified === false) {
+            logSignInActivity({
+                email,
+                user: user._id,
+                req,
+                status: "Failed",
+                failureReason: "Email address is not verified"
+            });
+
+            return res.status(403).json({
+                success: false,
+                code: "EMAIL_NOT_VERIFIED",
+                message: "Please verify your email address before logging in.",
+                email: user.email,
+                retryAfter: user.emailVerificationResendAt
+                    ? Math.max(0, Math.ceil((new Date(user.emailVerificationResendAt).getTime() - Date.now()) / 1000))
+                    : 0
+            });
+        }
+
         const token = generateToken(user._id, user.role);
 
         logSignInActivity({
@@ -168,6 +214,118 @@ exports.login = async (req, res) => {
     } catch (error) {
 
         sendError(res, 500, error.message);
+
+    }
+
+};
+
+
+/*
+Verify Email
+
+POST /api/auth/verify-email
+*/
+
+exports.verifyEmail = async (req, res) => {
+
+    try {
+
+        const { token } = req.body;
+        if (!token || typeof token !== "string") {
+            return sendError(res, 400, "A verification token is required");
+        }
+        const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
+        const user = await User.findOne({
+            emailVerificationToken: hashedToken,
+            emailVerificationExpire: { $gt: Date.now() }
+        });
+        if (!user) {
+            return sendError(res, 400, "Verification link is invalid or has expired");
+        }
+        user.emailVerified = true;
+        user.emailVerificationToken = undefined;
+        user.emailVerificationExpire = undefined;
+        user.emailVerificationResendAt = undefined;
+        await user.save({ validateBeforeSave: false });
+
+        return sendSuccess(res, 200, { message: "Email verified successfully. You can now log in." });
+
+    } catch (error) {
+
+        return sendError(res, 500, error.message);
+
+    }
+
+};
+
+
+/*
+Resend Email Verification
+
+POST /api/auth/resend-verification
+*/
+
+exports.resendVerification = async (req, res) => {
+
+    try {
+
+        const errors = validationResult(req);
+
+        if (!errors.isEmpty()) {
+            return sendError(res, 400, errors.array()[0].msg);
+        }
+
+        const email = req.body.email.toLowerCase();
+        const user = await User.findOne({ email }).select("+emailVerificationResendAt");
+
+        if (!user || user.emailVerified !== false) {
+            return sendSuccess(res, 200, {
+                message: "If the account needs verification, a new link has been sent."
+            });
+        }
+
+        const remainingMs = user.emailVerificationResendAt
+            ? new Date(user.emailVerificationResendAt).getTime() - Date.now()
+            : 0;
+
+        if (remainingMs > 0) {
+            const retryAfter = Math.ceil(remainingMs / 1000);
+            return res.status(429).json({
+                success: false,
+                message: `Please wait ${retryAfter} seconds before requesting another verification email.`,
+                retryAfter
+            });
+        }
+
+        const { token, hashedToken } = createEmailVerificationToken();
+        user.emailVerificationToken = hashedToken;
+        user.emailVerificationExpire = Date.now() + 24 * 60 * 60 * 1000;
+        user.emailVerificationResendAt = Date.now() + 60 * 1000;
+        await user.save({ validateBeforeSave: false });
+
+        const verificationUrl = `${process.env.CLIENT_URL}/verify-email/${token}`;
+        try {
+            await sendEmail({
+                to: user.email,
+                subject: "Verify your email address",
+                html: `<p>Please verify your email address to activate your account.</p><p><a href="${verificationUrl}">Verify email</a></p><p>This link expires in 24 hours.</p>`
+            });
+        } catch (emailError) {
+            user.emailVerificationToken = undefined;
+            user.emailVerificationExpire = undefined;
+            user.emailVerificationResendAt = undefined;
+            await user.save({ validateBeforeSave: false });
+            throw emailError;
+        }
+
+        return sendSuccess(res, 200, {
+            message: "If the account needs verification, a new link has been sent.",
+            retryAfter: 60
+        });
+
+    } catch (error) {
+
+        return sendError(res, 500, "Failed to send verification email, please try again later");
 
     }
 
@@ -269,6 +427,10 @@ exports.resetPassword = async (req, res) => {
 
             return sendError(res, 400, "Reset token is invalid or has expired");
 
+        }
+
+        if (user.emailVerified === false) {
+            return sendError(res, 403, "Please verify your email address before resetting your password");
         }
 
         user.password = await bcrypt.hash(req.body.password, 10);

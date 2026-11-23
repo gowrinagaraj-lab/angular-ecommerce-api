@@ -188,7 +188,7 @@ The API is a single stateless Node.js process:
 
 - **Horizontal scaling**: any number of instances can run behind a load balancer since there's no in-process session state — auth is a bearer JWT, verified independently by each instance.
 - **State lives entirely in MongoDB** (single connection string, `MONGO_URI`). No cache layer, message queue, or job runner is present.
-- **Outbound dependencies per request**: MongoDB (every request), Razorpay (checkout for CARD/UPI, and payment verification), SMTP (register/forgot-password/checkout/status-change/cancel/delivery-OTP/delivery-confirmation — all synchronous, in the request path, individually try/caught so a send failure degrades gracefully rather than failing the whole request, except forgot-password and delivery-OTP generation which roll back and fail the request if the email can't be sent).
+- **Outbound dependencies per request**: MongoDB (every request), Razorpay (checkout for CARD/UPI, and payment verification), SMTP (registration verification/forgot-password/checkout/status-change/cancel/delivery-OTP/delivery-confirmation — all synchronous in the request path; registration, forgot-password, and delivery-OTP generation fail the request if email cannot be sent).
 - **No reverse proxy / TLS termination config in this repo** — `helmet()` sets security headers, but HTTPS termination, rate limiting, and any WAF/CDN layer are expected to be provided by the hosting environment.
 - **File uploads**: `multer` is a declared dependency but no route currently uses it — product images are plain URL strings (`Product.images[].url`, `Product.mainImage`), implying image hosting (e.g. Cloudinary/S3) happens outside this API.
 

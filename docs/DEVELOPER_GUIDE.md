@@ -44,7 +44,7 @@ Server listens on `PORT` (default `5000`). On boot it connects to MongoDB (`src/
 
 ## 4. Bootstrapping data
 
-- **First user is admin automatically.** Register once via `POST /api/auth/register` and that account is `role: "admin"`.
+- **First user is admin automatically.** Register once via `POST /api/auth/register`; that account is `role: "admin"` after verifying its email.
 - **Promote an existing user to admin:**
   ```bash
   node scripts/promoteToAdmin.js user@example.com
@@ -113,7 +113,8 @@ Every existing resource follows the same shape. To add one (e.g. "reviews"):
 
 ## 8. Auth model
 
-- `POST /api/auth/register` / `login` return a JWT (`generateToken`, 7-day expiry, payload `{ id, role }`).
+- `POST /api/auth/register` creates an unverified account and emails a verification link; it does not issue a JWT. `POST /api/auth/verify-email` accepts the link token, and `POST /api/auth/resend-verification` resends it with a 60-second cooldown.
+- `POST /api/auth/login` issues a JWT (`generateToken`, 7-day expiry, payload `{ id, role }`) only after the account's email is verified.
 - Clients send `Authorization: Bearer <token>` on protected routes.
 - `protect` ([src/middleware/auth.middleware.js](../src/middleware/auth.middleware.js)) verifies the token and sets `req.user = { id, role }`. It does **not** hit the database — role comes straight from the token claim, so a role change (e.g. via `promoteToAdmin.js`) only takes effect on the user's *next* login/token issuance.
 - `authorize("admin")` ([src/middleware/authorize.middleware.js](../src/middleware/authorize.middleware.js)) checks `req.user.role` against the allowed list; must run after `protect`.

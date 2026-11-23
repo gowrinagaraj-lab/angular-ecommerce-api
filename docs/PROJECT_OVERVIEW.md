@@ -10,7 +10,7 @@ A companion Angular frontend (`projects/frontend`) consumes this API.
 
 | Domain | Responsibility |
 |---|---|
-| **Auth** | Registration, login, password reset, JWT issuance, sign-in activity audit log |
+| **Auth** | Email-verified registration, login, password reset, JWT issuance, sign-in activity audit log |
 | **Catalog** | Products and categories (CRUD, search, filtering, pagination) |
 | **Cart** | Per-user cart with stock-aware add/update/remove |
 | **Wishlist** | Per-user saved products |
@@ -34,7 +34,7 @@ A companion Angular frontend (`projects/frontend`) consumes this API.
 
 ## Key business rules worth knowing
 
-- **First registered user becomes admin.** Every subsequent registration is a `customer`. There is no separate admin-invite flow — promotion after the fact is done via `scripts/promoteToAdmin.js`.
+- **First registered user becomes admin.** Every subsequent registration is a `customer`; each account must verify its email before login. There is no separate admin-invite flow — promotion after the fact is done via `scripts/promoteToAdmin.js`.
 - **Stock is authoritative on `Product.stock`.** It's decremented at checkout (COD) or at payment verification (CARD/UPI), and restored on cancellation.
 - **Checkout is not atomic.** Order creation, stock decrement, and cart clearing are separate sequential writes with no MongoDB transaction wrapping them (see [Architecture](./ARCHITECTURE.md#known-gaps) for the implication).
 - **Delivery confirmation is OTP-based.** An admin generates a one-time code (emailed to the customer), and a second admin call verifies it to mark the order `Delivered`.

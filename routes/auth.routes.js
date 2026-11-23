@@ -9,6 +9,8 @@ const authorize = require("../src/middleware/authorize.middleware");
 const {
     register,
     login,
+    verifyEmail,
+    resendVerification,
     forgotPassword,
     resetPassword,
     getMySignInActivity,
@@ -48,6 +50,19 @@ router.post(
             .withMessage("Password is required")
     ],
     login
+);
+
+router.post("/verify-email", verifyEmail);
+
+router.post(
+    "/resend-verification",
+    [
+        body("email")
+            .trim()
+            .isEmail()
+            .withMessage("A valid email is required")
+    ],
+    resendVerification
 );
 
 router.post(
