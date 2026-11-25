@@ -195,6 +195,92 @@ describe("product.controller", () => {
 
         });
 
+        it("filters by brand with a case-insensitive regex", async () => {
+
+            Product.countDocuments.mockResolvedValue(0);
+            Product.find.mockReturnValue(chainable([]));
+
+            const req = { query: { brand: "Sony" } };
+            const res = mockResponse();
+
+            await productController.getProducts(req, res);
+
+            expect(Product.find).toHaveBeenCalledWith({ brand: { $regex: "Sony", $options: "i" } });
+
+        });
+
+        it("filters by a minPrice/maxPrice range", async () => {
+
+            Product.countDocuments.mockResolvedValue(0);
+            Product.find.mockReturnValue(chainable([]));
+
+            const req = { query: { minPrice: "100", maxPrice: "500" } };
+            const res = mockResponse();
+
+            await productController.getProducts(req, res);
+
+            expect(Product.find).toHaveBeenCalledWith({ price: { $gte: 100, $lte: 500 } });
+
+        });
+
+        it("ignores a non-numeric price bound", async () => {
+
+            Product.countDocuments.mockResolvedValue(0);
+            Product.find.mockReturnValue(chainable([]));
+
+            const req = { query: { minPrice: "not-a-number" } };
+            const res = mockResponse();
+
+            await productController.getProducts(req, res);
+
+            expect(Product.find).toHaveBeenCalledWith({});
+
+        });
+
+        it("filters to in-stock products only", async () => {
+
+            Product.countDocuments.mockResolvedValue(0);
+            Product.find.mockReturnValue(chainable([]));
+
+            const req = { query: { inStock: "true" } };
+            const res = mockResponse();
+
+            await productController.getProducts(req, res);
+
+            expect(Product.find).toHaveBeenCalledWith({ stock: { $gt: 0 } });
+
+        });
+
+        it("sorts by an allowed field", async () => {
+
+            Product.countDocuments.mockResolvedValue(0);
+            const query = chainable([]);
+            Product.find.mockReturnValue(query);
+
+            const req = { query: { sort: "price" } };
+            const res = mockResponse();
+
+            await productController.getProducts(req, res);
+
+            expect(query.sort).toHaveBeenCalledWith("price");
+
+        });
+
+        it("falls back to newest-first for a disallowed sort field", async () => {
+
+            Product.countDocuments.mockResolvedValue(0);
+            const query = chainable([]);
+            Product.find.mockReturnValue(query);
+
+            const req = { query: { sort: "__proto__" } };
+            const res = mockResponse();
+
+            await productController.getProducts(req, res);
+
+            expect(query.sort).toHaveBeenCalledWith("-createdAt");
+
+        });
+
         it("short-circuits to an empty result when the category name has no match", async () => {
 
             Category.findOne.mockResolvedValue(null);

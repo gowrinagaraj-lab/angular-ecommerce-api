@@ -2,16 +2,35 @@ const mongoose = require("mongoose");
 const Product = require("../src/models/Product");
 const Category = require("../src/models/Category");
 
+// Only these fields may be sorted on; anything else (or missing) falls back to newest-first
+const ALLOWED_SORT_FIELDS = new Set(["name", "price", "rating", "createdAt"]);
+
+const resolveSort = (sort) => {
+    if (!sort) {
+        return "-createdAt";
+    }
+
+    const field = sort.replace(/^-/, "");
+
+    if (!ALLOWED_SORT_FIELDS.has(field)) {
+        return "-createdAt";
+    }
+
+    return sort.startsWith("-") ? `-${field}` : field;
+};
+
 const listProducts = async (query = {}) => {
 
-    
+
     const page = Math.max(1, Number(query.page) || 1);
     const limit = Math.max(1, Number(query.limit) || 10);
     const skip = (page - 1) * limit;
 
     const search = query.search || "";
     let category = query.category || "";
-    const sort = query.sort || "-createdAt";
+    const brand = query.brand || "";
+    const inStock = query.inStock === "true";
+    const sort = resolveSort(query.sort);
     const filter = {};
 
     if (search) {
@@ -19,6 +38,35 @@ const listProducts = async (query = {}) => {
             $regex: search,
             $options: "i"
         };
+    }
+
+    if (brand) {
+        filter.brand = {
+            $regex: brand,
+            $options: "i"
+        };
+    }
+
+    if (query.minPrice !== undefined || query.maxPrice !== undefined) {
+        const minPrice = Number(query.minPrice);
+        const maxPrice = Number(query.maxPrice);
+        const price = {};
+
+        if (query.minPrice !== undefined && !Number.isNaN(minPrice)) {
+            price.$gte = minPrice;
+        }
+
+        if (query.maxPrice !== undefined && !Number.isNaN(maxPrice)) {
+            price.$lte = maxPrice;
+        }
+
+        if (Object.keys(price).length > 0) {
+            filter.price = price;
+        }
+    }
+
+    if (inStock) {
+        filter.stock = { $gt: 0 };
     }
 
     if (category) {
