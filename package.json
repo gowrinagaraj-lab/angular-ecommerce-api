@@ -31,6 +31,7 @@
     "multer": "^2.2.0",
     "nodemailer": "^9.0.4",
     "razorpay": "^2.9.8",
+    "sharp": "^0.35.5",
     "socket.io": "^4.8.3"
   },
   "devDependencies": {

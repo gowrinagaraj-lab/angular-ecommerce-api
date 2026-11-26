@@ -3,6 +3,7 @@ jest.mock("../../src/models/Category");
 jest.mock("../../services/inventory.service");
 jest.mock("../../src/realtime/productEvents");
 
+const fs = require("fs");
 const mongoose = require("mongoose");
 const Product = require("../../src/models/Product");
 const Category = require("../../src/models/Category");
@@ -102,6 +103,47 @@ describe("product.controller", () => {
             await productController.createProduct(req, res);
 
             expect(res.status).toHaveBeenCalledWith(500);
+
+        });
+
+        it("saves the uploaded file's path as mainImage", async () => {
+
+            Product.findOne.mockResolvedValue(null);
+            const validId = new mongoose.Types.ObjectId().toString();
+            Category.findById.mockResolvedValue({ _id: validId });
+            Product.create.mockResolvedValue({ _id: "p1", name: "Widget", mainImage: "/uploads/products/new.webp" });
+
+            const req = {
+                body: { name: "Widget", category: validId },
+                file: { filename: "new.webp" },
+                app: mockIoApp()
+            };
+            const res = mockResponse();
+
+            await productController.createProduct(req, res);
+
+            expect(Product.create).toHaveBeenCalledWith(
+                expect.objectContaining({ mainImage: "/uploads/products/new.webp" })
+            );
+            expect(res.status).toHaveBeenCalledWith(201);
+
+        });
+
+        it("deletes the uploaded file when creation fails", async () => {
+
+            const unlinkSpy = jest.spyOn(fs, "unlink").mockImplementation((_path, cb) => cb());
+
+            Product.findOne.mockResolvedValue({ _id: "existing" });
+
+            const req = { body: { name: "Widget" }, file: { filename: "new.webp" } };
+            const res = mockResponse();
+
+            await productController.createProduct(req, res);
+
+            expect(unlinkSpy).toHaveBeenCalledWith(expect.stringContaining("new.webp"), expect.any(Function));
+            expect(Product.create).not.toHaveBeenCalled();
+
+            unlinkSpy.mockRestore();
 
         });
 
@@ -434,6 +476,55 @@ describe("product.controller", () => {
 
         });
 
+        it("saves the uploaded file's path and removes the previous local upload", async () => {
+
+            const unlinkSpy = jest.spyOn(fs, "unlink").mockImplementation((_path, cb) => cb());
+
+            Product.findOne.mockResolvedValue(null);
+            Product.findById.mockReturnValue({ select: jest.fn().mockResolvedValue({ mainImage: "/uploads/products/old.webp" }) });
+            const updated = { _id: "p1", name: "Widget", mainImage: "/uploads/products/new.webp" };
+            Product.findByIdAndUpdate.mockResolvedValue(updated);
+
+            const req = {
+                params: { id: "p1" },
+                body: { name: "Widget" },
+                file: { filename: "new.webp" },
+                app: mockIoApp()
+            };
+            const res = mockResponse();
+
+            await productController.updateProduct(req, res);
+
+            expect(Product.findByIdAndUpdate).toHaveBeenCalledWith(
+                "p1",
+                expect.objectContaining({ mainImage: "/uploads/products/new.webp" }),
+                expect.any(Object)
+            );
+            expect(unlinkSpy).toHaveBeenCalledWith(expect.stringContaining("old.webp"), expect.any(Function));
+
+            unlinkSpy.mockRestore();
+
+        });
+
+        it("does not remove the previous image when a manual URL replaces it and nothing new was uploaded", async () => {
+
+            const unlinkSpy = jest.spyOn(fs, "unlink").mockImplementation((_path, cb) => cb());
+
+            Product.findOne.mockResolvedValue(null);
+            Product.findByIdAndUpdate.mockResolvedValue({ _id: "p1", mainImage: "https://example.com/pic.jpg" });
+
+            const req = { params: { id: "p1" }, body: { name: "Widget", mainImage: "https://example.com/pic.jpg" } };
+            const res = mockResponse();
+
+            await productController.updateProduct(req, res);
+
+            expect(Product.findById).not.toHaveBeenCalled();
+            expect(unlinkSpy).not.toHaveBeenCalled();
+
+            unlinkSpy.mockRestore();
+
+        });
+
     });
 
     describe("deleteProduct", () => {
@@ -462,6 +553,40 @@ describe("product.controller", () => {
 
             expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ success: true }));
             expect(publishProductChange).toHaveBeenCalledWith("delete", expect.objectContaining({ _id: "p1" }));
+
+        });
+
+        it("removes the product's local upload file when deleted", async () => {
+
+            const unlinkSpy = jest.spyOn(fs, "unlink").mockImplementation((_path, cb) => cb());
+
+            Product.findByIdAndDelete.mockResolvedValue({ _id: "p1", mainImage: "/uploads/products/old.webp" });
+
+            const req = { params: { id: "p1" }, app: mockIoApp() };
+            const res = mockResponse();
+
+            await productController.deleteProduct(req, res);
+
+            expect(unlinkSpy).toHaveBeenCalledWith(expect.stringContaining("old.webp"), expect.any(Function));
+
+            unlinkSpy.mockRestore();
+
+        });
+
+        it("does not try to remove an external image URL when deleted", async () => {
+
+            const unlinkSpy = jest.spyOn(fs, "unlink").mockImplementation((_path, cb) => cb());
+
+            Product.findByIdAndDelete.mockResolvedValue({ _id: "p1", mainImage: "https://example.com/pic.jpg" });
+
+            const req = { params: { id: "p1" }, app: mockIoApp() };
+            const res = mockResponse();
+
+            await productController.deleteProduct(req, res);
+
+            expect(unlinkSpy).not.toHaveBeenCalled();
+
+            unlinkSpy.mockRestore();
 
         });
 

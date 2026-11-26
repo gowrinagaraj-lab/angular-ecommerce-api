@@ -1,16 +1,37 @@
+const fs = require("fs");
+const path = require("path");
 const mongoose = require("mongoose");
 const Product = require("../src/models/Product");
 const Category = require("../src/models/Category");
 const { listProducts } = require("../services/product.service");
 const { checkLowStock, getInventorySummary } = require("../services/inventory.service");
 const { publishProductChange } = require("../src/realtime/productEvents");
+const { UPLOAD_ROOT } = require("../src/middleware/productUpload.middleware");
 const { sendSuccess, sendError } = require("../src/utils/response");
+
+const PRODUCT_UPLOAD_PREFIX = "/uploads/products/";
+
+// Removes a just-uploaded image when the request fails after multer already saved it,
+// so a rejected create/update doesn't leave an orphaned file on disk.
+const cleanupUploadedFile = (req) => {
+  if (req.file?.filename) {
+    fs.unlink(path.join(UPLOAD_ROOT, req.file.filename), () => {});
+  }
+};
+
+// Removes the previous local upload once it's no longer referenced by the product
+const deleteIfLocalUpload = (imagePath) => {
+  if (imagePath && imagePath.startsWith(PRODUCT_UPLOAD_PREFIX)) {
+    fs.unlink(path.join(UPLOAD_ROOT, imagePath.slice(PRODUCT_UPLOAD_PREFIX.length)), () => {});
+  }
+};
 
 /*
 Create Product
 POST /api/products
 */
 exports.createProduct = async (req, res) => {
+ 
   try {
 
     const { name, category } = req.body;
@@ -22,6 +43,7 @@ exports.createProduct = async (req, res) => {
       });
 
       if (existingProduct) {
+        cleanupUploadedFile(req);
         return sendError(res, 400, `Product with name "${name}" already exists.`);
       }
     }
@@ -29,13 +51,19 @@ exports.createProduct = async (req, res) => {
     // 2. Validate Category Reference
     if (category) {
       if (!mongoose.Types.ObjectId.isValid(category)) {
+        cleanupUploadedFile(req);
         return sendError(res, 400, "Invalid category ID format");
       }
 
       const categoryExists = await Category.findById(category);
       if (!categoryExists) {
+        cleanupUploadedFile(req);
         return sendError(res, 400, "Category not found");
       }
+    }
+
+    if (req.file) {
+      req.body.mainImage = `${PRODUCT_UPLOAD_PREFIX}${req.file.filename}`;
     }
 
     const product = await Product.create(req.body);
@@ -47,6 +75,8 @@ exports.createProduct = async (req, res) => {
     sendSuccess(res, 201, { message: "Product created successfully", data: product });
 
   } catch (error) {
+    cleanupUploadedFile(req);
+
     // Catch Mongoose unique index violation error (Code 11000)
     if (error.code === 11000) {
       const field = Object.keys(error.keyValue)[0];
@@ -103,6 +133,8 @@ Update Product
 PUT /api/products/:id
 */
 exports.updateProduct = async (req, res) => {
+  debugger;
+  console.log("Update Product Request Body:", req.body);
   try {
     const { name } = req.body;
 
@@ -114,8 +146,23 @@ exports.updateProduct = async (req, res) => {
       });
 
       if (existingProduct) {
+        cleanupUploadedFile(req);
         return sendError(res, 400, `Another product with name "${name}" already exists.`);
       }
+    }
+
+    let previousMainImage;
+
+    if (req.file) {
+      const existing = await Product.findById(req.params.id).select("mainImage");
+
+      if (!existing) {
+        cleanupUploadedFile(req);
+        return sendError(res, 404, "Product not found");
+      }
+
+      previousMainImage = existing.mainImage;
+      req.body.mainImage = `${PRODUCT_UPLOAD_PREFIX}${req.file.filename}`;
     }
 
     const product = await Product.findByIdAndUpdate(
@@ -128,7 +175,12 @@ exports.updateProduct = async (req, res) => {
     );
 
     if (!product) {
+      cleanupUploadedFile(req);
       return sendError(res, 404, "Product not found");
+    }
+
+    if (previousMainImage && previousMainImage !== product.mainImage) {
+      deleteIfLocalUpload(previousMainImage);
     }
 
     // A stock or threshold change may cross the low-stock line either way
@@ -140,6 +192,9 @@ exports.updateProduct = async (req, res) => {
 
     sendSuccess(res, 200, { message: "Product updated successfully", data: product });
   } catch (error) {
+    console.warn("Error updating product:", error);
+    cleanupUploadedFile(req);
+
     if (error.code === 11000) {
       const field = Object.keys(error.keyValue)[0];
       return sendError(res, 400, `Duplicate entry: A product with this ${field} already exists.`);
@@ -161,6 +216,8 @@ exports.deleteProduct = async (req, res) => {
     if (!product) {
       return sendError(res, 404, "Product not found");
     }
+
+    deleteIfLocalUpload(product.mainImage);
 
     void publishProductChange("delete", { _id: product._id, name: product.name });
 
