@@ -102,7 +102,6 @@ exports.getProducts = async (req, res) => {
   }
 };
 
-
 /*
 Get Product By Id
 GET /api/products/:id
@@ -133,7 +132,7 @@ Update Product
 PUT /api/products/:id
 */
 exports.updateProduct = async (req, res) => {
-  debugger;
+ 
   console.log("Update Product Request Body:", req.body);
   try {
     const { name } = req.body;

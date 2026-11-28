@@ -5,7 +5,7 @@ const Product = require("../src/models/Product");
 
 const recalculateProductRating = async (productId) => {
     const [stats] = await Review.aggregate([
-        { $match: { product: new mongoose.Types.ObjectId(productId) } },
+        { $match: { product: new mongoose.Types.ObjectId(productId), status: "visible" } },
         { $group: { _id: "$product", avgRating: { $avg: "$rating" }, count: { $sum: 1 } } }
     ]);
 

@@ -196,7 +196,7 @@ describe("review.controller", () => {
 
             await reviewController.getProductReviews(req, res);
 
-            expect(Review.find).toHaveBeenCalledWith({ product: productId });
+            expect(Review.find).toHaveBeenCalledWith({ product: productId, status: "visible" });
             expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
                 success: true,
                 total: 1,
@@ -338,6 +338,155 @@ describe("review.controller", () => {
             await reviewController.deleteReview(req, res);
 
             expect(res.status).toHaveBeenCalledWith(404);
+
+        });
+
+    });
+
+    describe("reportReview", () => {
+
+        it("returns 400 for a malformed review ID", async () => {
+
+            const req = { user: { id: "user-1" }, params: { id: "not-an-id" }, body: {} };
+            const res = mockResponse();
+
+            await reviewController.reportReview(req, res);
+
+            expect(res.status).toHaveBeenCalledWith(400);
+
+        });
+
+        it("returns 404 when the review does not exist", async () => {
+
+            const reviewId = new mongoose.Types.ObjectId().toString();
+            Review.findById.mockResolvedValue(null);
+
+            const req = { user: { id: "user-1" }, params: { id: reviewId }, body: {} };
+            const res = mockResponse();
+
+            await reviewController.reportReview(req, res);
+
+            expect(res.status).toHaveBeenCalledWith(404);
+
+        });
+
+        it("rejects a duplicate report from the same user", async () => {
+
+            const reviewId = new mongoose.Types.ObjectId().toString();
+            const review = {
+                reports: [{ user: { toString: () => "user-1" } }],
+                reportCount: 1,
+                save: jest.fn()
+            };
+            Review.findById.mockResolvedValue(review);
+
+            const req = { user: { id: "user-1" }, params: { id: reviewId }, body: { reason: "spam" } };
+            const res = mockResponse();
+
+            await reviewController.reportReview(req, res);
+
+            expect(review.save).not.toHaveBeenCalled();
+            expect(res.status).toHaveBeenCalledWith(409);
+
+        });
+
+        it("adds a report and saves the review", async () => {
+
+            const reviewId = new mongoose.Types.ObjectId().toString();
+            const review = {
+                reports: [],
+                reportCount: 0,
+                save: jest.fn().mockResolvedValue(true)
+            };
+            Review.findById.mockResolvedValue(review);
+
+            const req = { user: { id: "user-1" }, params: { id: reviewId }, body: { reason: "spam" } };
+            const res = mockResponse();
+
+            await reviewController.reportReview(req, res);
+
+            expect(review.reports).toEqual([{ user: "user-1", reason: "spam" }]);
+            expect(review.reportCount).toBe(1);
+            expect(review.save).toHaveBeenCalled();
+            expect(res.status).toHaveBeenCalledWith(200);
+
+        });
+
+    });
+
+    describe("getModerationQueue", () => {
+
+        it("returns paginated reviews that are hidden or have reports", async () => {
+
+            const reviews = [{ _id: "r1", reportCount: 3 }];
+
+            Review.countDocuments.mockResolvedValue(1);
+            Review.find.mockReturnValue({
+                populate: jest.fn().mockReturnThis(),
+                sort: jest.fn().mockReturnThis(),
+                skip: jest.fn().mockReturnThis(),
+                limit: jest.fn().mockResolvedValue(reviews)
+            });
+
+            const req = { query: {} };
+            const res = mockResponse();
+
+            await reviewController.getModerationQueue(req, res);
+
+            expect(Review.find).toHaveBeenCalledWith({
+                $or: [{ reportCount: { $gt: 0 } }, { status: "hidden" }]
+            });
+            expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+                success: true,
+                total: 1,
+                data: reviews
+            }));
+
+        });
+
+    });
+
+    describe("moderateReview", () => {
+
+        it("returns 404 when the review does not exist", async () => {
+
+            const reviewId = new mongoose.Types.ObjectId().toString();
+            Review.findById.mockResolvedValue(null);
+
+            const req = { params: { id: reviewId }, body: { status: "hidden" } };
+            const res = mockResponse();
+
+            await reviewController.moderateReview(req, res);
+
+            expect(res.status).toHaveBeenCalledWith(404);
+
+        });
+
+        it("hides a review, clears its reports, and recalculates the product rating", async () => {
+
+            const reviewId = new mongoose.Types.ObjectId().toString();
+            const productId = new mongoose.Types.ObjectId().toString();
+            const review = {
+                _id: reviewId,
+                product: productId,
+                status: "visible",
+                reports: [{ user: "user-1" }],
+                reportCount: 1,
+                save: jest.fn().mockResolvedValue(true)
+            };
+            Review.findById.mockResolvedValue(review);
+
+            const req = { params: { id: reviewId }, body: { status: "hidden" } };
+            const res = mockResponse();
+
+            await reviewController.moderateReview(req, res);
+
+            expect(review.status).toBe("hidden");
+            expect(review.reports).toEqual([]);
+            expect(review.reportCount).toBe(0);
+            expect(review.save).toHaveBeenCalled();
+            expect(recalculateProductRating).toHaveBeenCalledWith(productId);
+            expect(res.status).toHaveBeenCalledWith(200);
 
         });
 

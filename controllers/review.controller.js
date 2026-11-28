@@ -26,7 +26,7 @@ const buildMediaFromFiles = (files = {}) => {
             });
         });
     });
-console.log("Built media from files:", media);
+
     return media;
 };
 
@@ -44,8 +44,6 @@ Create Review
 POST /api/reviews
 */
 exports.createReview = async (req, res) => {
-    
-    console.log("Request body:", req.body);
     try {
         const errors = validationResult(req);
 
@@ -122,7 +120,7 @@ exports.getProductReviews = async (req, res) => {
         const limit = Math.max(1, Number(req.query.limit) || 10);
         const skip = (page - 1) * limit;
 
-        const filter = { product: req.params.productId };
+        const filter = { product: req.params.productId, status: "visible" };
 
         const total = await Review.countDocuments(filter);
         const reviews = await Review.find(filter)
@@ -242,6 +240,123 @@ exports.deleteReview = async (req, res) => {
         await recalculateProductRating(review.product);
 
         sendSuccess(res, 200, { message: "Review deleted successfully" });
+    } catch (error) {
+        sendError(res, 500, error.message);
+    }
+};
+
+/*
+Report a Review (spam / abuse)
+
+POST /api/reviews/:id/report
+*/
+exports.reportReview = async (req, res) => {
+    try {
+        const errors = validationResult(req);
+
+        if (!errors.isEmpty()) {
+            return sendError(res, 400, errors.array()[0].msg);
+        }
+
+        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+            return sendError(res, 400, "Invalid review ID format");
+        }
+
+        const review = await Review.findById(req.params.id);
+
+        if (!review) {
+            return sendError(res, 404, "Review not found");
+        }
+
+        const alreadyReported = review.reports.some(
+            (report) => report.user.toString() === req.user.id
+        );
+
+        if (alreadyReported) {
+            return sendError(res, 409, "You have already reported this review");
+        }
+
+        review.reports.push({ user: req.user.id, reason: req.body.reason || "" });
+        review.reportCount = review.reports.length;
+
+        await review.save();
+
+        sendSuccess(res, 200, {
+            message: "Review reported. Our moderation team will take a look.",
+            data: { reportCount: review.reportCount }
+        });
+    } catch (error) {
+        sendError(res, 500, error.message);
+    }
+};
+
+/*
+Get Moderation Queue (Admin): reviews that are hidden or have been reported
+
+GET /api/reviews/admin/queue
+*/
+exports.getModerationQueue = async (req, res) => {
+    try {
+        const page = Math.max(1, Number(req.query.page) || 1);
+        const limit = Math.max(1, Number(req.query.limit) || 10);
+        const skip = (page - 1) * limit;
+
+        const filter = { $or: [{ reportCount: { $gt: 0 } }, { status: "hidden" }] };
+
+        const total = await Review.countDocuments(filter);
+        const reviews = await Review.find(filter)
+            .populate("product", "name")
+            .populate("user", "name email")
+            .populate("reports.user", "name email")
+            .sort("-reportCount -createdAt")
+            .skip(skip)
+            .limit(limit);
+
+        sendSuccess(res, 200, {
+            total,
+            page,
+            totalPages: Math.ceil(total / limit),
+            data: reviews
+        });
+    } catch (error) {
+        sendError(res, 500, error.message);
+    }
+};
+
+/*
+Moderate a Review (Admin): approve (keep visible) or hide it, clearing any reports
+
+PATCH /api/reviews/:id/moderate
+*/
+exports.moderateReview = async (req, res) => {
+    try {
+        const errors = validationResult(req);
+
+        if (!errors.isEmpty()) {
+            return sendError(res, 400, errors.array()[0].msg);
+        }
+
+        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+            return sendError(res, 400, "Invalid review ID format");
+        }
+
+        const review = await Review.findById(req.params.id);
+
+        if (!review) {
+            return sendError(res, 404, "Review not found");
+        }
+
+        review.status = req.body.status;
+        review.reports = [];
+        review.reportCount = 0;
+
+        await review.save();
+        await recalculateProductRating(review.product);
+
+        sendSuccess(res, 200, {
+            message: review.status === "hidden" ? "Review hidden" : "Review approved",
+            data: review
+        });
     } catch (error) {
         sendError(res, 500, error.message);
     }

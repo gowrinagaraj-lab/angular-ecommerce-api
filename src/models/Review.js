@@ -48,7 +48,40 @@ const reviewSchema = new mongoose.Schema(
       trim: true,
       default: ""
     },
-    media: [reviewMediaSchema]
+    media: [reviewMediaSchema],
+
+    // Post-moderation: reviews stay visible by default; admins hide spam/abuse
+    // after the fact, which also excludes them from the product's rating.
+    status: {
+      type: String,
+      enum: ["visible", "hidden"],
+      default: "visible",
+      index: true
+    },
+
+    reportCount: {
+      type: Number,
+      default: 0
+    },
+
+    reports: [
+      {
+        user: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+          required: true
+        },
+        reason: {
+          type: String,
+          trim: true,
+          default: ""
+        },
+        createdAt: {
+          type: Date,
+          default: Date.now
+        }
+      }
+    ]
   },
   {
     timestamps: true
